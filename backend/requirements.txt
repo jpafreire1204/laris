@@ -1,0 +1,32 @@
+# Laris Backend Dependencies
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# PDF/Document Processing
+pypdf>=4.0.1
+pdfplumber>=0.10.3
+python-docx>=1.1.0
+
+# Language Detection
+langdetect>=1.0.9
+
+# Translation (offline) - using latest compatible version
+argostranslate>=1.9.6
+
+# TTS
+edge-tts>=6.1.9
+
+# Audio processing
+pydub>=0.25.1
+
+# PDF generation
+reportlab>=4.0.0
+
+# Testing
+pytest>=7.4.4
+pytest-asyncio>=0.23.3
+httpx>=0.26.0
+
+# Utilities
+aiofiles>=23.2.1
