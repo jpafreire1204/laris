@@ -1,6 +1,7 @@
 /**
  * Laris - Generate Card Component
  * Card para geração de áudio e download.
+ * Com tratamento robusto de erros e estados.
  */
 
 import React from 'react';
@@ -26,7 +27,7 @@ export function GenerateCard({
   disabled,
 }: GenerateCardProps) {
   const isProcessing = loading || (jobStatus && jobStatus.status !== 'completed' && jobStatus.status !== 'error');
-  const isComplete = jobStatus?.status === 'completed' || audioUrl;
+  const isComplete = jobStatus?.status === 'completed' && audioUrl;
   const hasError = jobStatus?.status === 'error';
 
   const getStatusMessage = () => {
@@ -40,14 +41,19 @@ export function GenerateCard({
       case 'translating':
         return 'Traduzindo texto...';
       case 'generating_audio':
-        return 'Gerando áudio... Isso pode levar alguns segundos.';
+        return jobStatus.message || 'Gerando áudio... Isso pode levar alguns segundos.';
       case 'completed':
-        return 'Áudio gerado com sucesso!';
+        return jobStatus.message || 'Áudio gerado com sucesso!';
       case 'error':
         return jobStatus.error || 'Ocorreu um erro.';
       default:
-        return jobStatus.message;
+        return jobStatus.message || 'Processando...';
     }
+  };
+
+  const getProgressPercentage = () => {
+    if (!jobStatus) return 0;
+    return Math.min(Math.max(jobStatus.progress, 0), 100);
   };
 
   return (
@@ -59,52 +65,60 @@ export function GenerateCard({
         </p>
       </div>
 
-      {/* Botão de gerar */}
-      {!isComplete && !hasError && (
+      {/* Botão de gerar - visível quando não está completo nem processando */}
+      {!isComplete && !isProcessing && !hasError && (
         <button
           onClick={onGenerate}
-          disabled={disabled || isProcessing}
+          disabled={disabled}
           className="btn btn-primary btn-large"
-          aria-busy={isProcessing}
           style={{ marginBottom: 'var(--spacing-lg)' }}
         >
-          {isProcessing ? (
-            <>
-              <span className="spinner" />
-              Gerando áudio...
-            </>
-          ) : (
-            <>
-              🔊 Gerar Áudio
-            </>
-          )}
+          🔊 Gerar Áudio
         </button>
       )}
 
-      {/* Barra de progresso */}
-      {isProcessing && jobStatus && (
+      {/* Barra de progresso durante processamento */}
+      {isProcessing && (
         <div
           role="progressbar"
-          aria-valuenow={jobStatus.progress}
+          aria-valuenow={getProgressPercentage()}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-label="Progresso da geração de áudio"
+          style={{ marginBottom: 'var(--spacing-lg)' }}
         >
           <div className="progress-container">
             <div
               className="progress-bar"
-              style={{ width: `${jobStatus.progress}%` }}
+              style={{ width: `${getProgressPercentage()}%` }}
             />
           </div>
-          <p
+          <div
             aria-live="polite"
             style={{
-              textAlign: 'center',
-              color: 'var(--color-text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 'var(--spacing-sm)',
               marginTop: 'var(--spacing-sm)',
             }}
           >
-            {getStatusMessage()}
+            <span className="spinner" />
+            <p style={{
+              textAlign: 'center',
+              color: 'var(--color-text-secondary)',
+              margin: 0,
+            }}>
+              {getStatusMessage()}
+            </p>
+          </div>
+          <p style={{
+            textAlign: 'center',
+            color: 'var(--color-text-muted)',
+            fontSize: 'var(--font-size-sm)',
+            marginTop: 'var(--spacing-sm)',
+          }}>
+            {getProgressPercentage()}% concluído
           </p>
         </div>
       )}
@@ -112,12 +126,17 @@ export function GenerateCard({
       {/* Erro */}
       {hasError && (
         <div style={{ marginBottom: 'var(--spacing-lg)' }}>
-          <div className="alert alert-error" role="alert">
+          <div
+            className="alert alert-error"
+            role="alert"
+            aria-live="assertive"
+          >
             {jobStatus?.error || 'Ocorreu um erro ao gerar o áudio.'}
           </div>
           <button
             onClick={onGenerate}
             className="btn btn-primary"
+            disabled={disabled}
           >
             Tentar novamente
           </button>
@@ -223,7 +242,7 @@ export function GenerateCard({
         </div>
       )}
 
-      {/* Dica */}
+      {/* Dica quando pronto para gerar */}
       {!isComplete && !isProcessing && !hasError && (
         <p style={{
           color: 'var(--color-text-muted)',

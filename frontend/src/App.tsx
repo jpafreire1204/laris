@@ -1,9 +1,10 @@
 /**
  * Laris - Aplicação Principal
  * Conversor de artigos científicos em áudio.
+ * Com tratamento robusto de erros e timeouts.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Header } from './components/Header';
 import { Steps } from './components/Steps';
 import { UploadCard } from './components/UploadCard';
@@ -11,6 +12,9 @@ import { OptionsCard } from './components/OptionsCard';
 import { GenerateCard } from './components/GenerateCard';
 import { Alert } from './components/Alert';
 import { useApi, Voice, JobStatus, ExtractResponse } from './hooks/useApi';
+
+// Tempo máximo de polling (11 minutos - backend tem 10min timeout)
+const MAX_POLL_TIME_MS = 660000;
 
 function App() {
   // Acessibilidade
@@ -37,11 +41,15 @@ function App() {
   const [textUrl, setTextUrl] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
+  // Ref para controlar tempo de polling
+  const pollStartTimeRef = useRef<number>(0);
+
   // API
   const {
     loading,
     error,
     setError,
+    resetState,
     extractText,
     translateText,
     getVoices,
@@ -79,7 +87,7 @@ function App() {
             break;
           case 'g':
             e.preventDefault();
-            if (currentStep >= 2) {
+            if (currentStep >= 2 && !loading) {
               handleGenerate();
             }
             break;
@@ -95,30 +103,69 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentStep, audioUrl]);
+  }, [currentStep, audioUrl, loading]);
 
-  // Polling do status do job
+  // Polling do status do job com timeout
   useEffect(() => {
-    if (!jobStatus || jobStatus.status === 'completed' || jobStatus.status === 'error') {
+    if (!jobStatus) {
       return;
     }
 
-    const interval = setInterval(async () => {
-      const status = await checkJobStatus(jobStatus.job_id);
-      if (status) {
-        setJobStatus(status);
+    // Se já terminou (sucesso ou erro), não faz polling
+    if (jobStatus.status === 'completed' || jobStatus.status === 'error') {
+      pollStartTimeRef.current = 0;
+      return;
+    }
 
-        if (status.status === 'completed') {
-          setAudioUrl(status.audio_url || null);
-          setTextUrl(status.text_url || null);
-          setPdfUrl(status.pdf_url || null);
-          setCurrentStep(3);
-        }
+    // Inicializa tempo de início do polling
+    if (pollStartTimeRef.current === 0) {
+      pollStartTimeRef.current = Date.now();
+    }
+
+    const interval = setInterval(async () => {
+      // Verifica timeout do polling
+      const elapsedTime = Date.now() - pollStartTimeRef.current;
+      if (elapsedTime > MAX_POLL_TIME_MS) {
+        console.warn('Polling timeout reached');
+        setJobStatus({
+          ...jobStatus,
+          status: 'error',
+          error: 'O processamento demorou muito. Por favor, tente novamente.',
+          message: 'Tempo limite excedido'
+        });
+        setError('O processamento demorou muito. Por favor, tente novamente.');
+        resetState();
+        pollStartTimeRef.current = 0;
+        return;
       }
-    }, 1000);
+
+      try {
+        const status = await checkJobStatus(jobStatus.job_id);
+
+        if (status) {
+          setJobStatus(status);
+
+          if (status.status === 'completed') {
+            setAudioUrl(status.audio_url || null);
+            setTextUrl(status.text_url || null);
+            setPdfUrl(status.pdf_url || null);
+            setCurrentStep(3);
+            pollStartTimeRef.current = 0;
+          } else if (status.status === 'error') {
+            pollStartTimeRef.current = 0;
+            if (status.error) {
+              setError(status.error);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Erro no polling:', err);
+        // Não para o polling por erro individual, apenas loga
+      }
+    }, 1500); // Poll a cada 1.5s para reduzir carga
 
     return () => clearInterval(interval);
-  }, [jobStatus, checkJobStatus]);
+  }, [jobStatus, checkJobStatus, setError, resetState]);
 
   // Handlers
   const handleFileSelect = async (file: File) => {
@@ -130,6 +177,7 @@ function App() {
     setAudioUrl(null);
     setTextUrl(null);
     setPdfUrl(null);
+    pollStartTimeRef.current = 0;
 
     const data = await extractText(file);
 
@@ -138,7 +186,6 @@ function App() {
       setNeedsTranslation(!data.is_portuguese);
       setCurrentStep(2);
 
-      // Se já é português, não precisa traduzir
       if (data.is_portuguese) {
         setTranslatedText(data.text);
         setTranslationComplete(true);
@@ -169,18 +216,23 @@ function App() {
     const textToSpeak = translatedText || extractedData?.text;
     if (!textToSpeak) return;
 
+    // Limpa estados anteriores
     setError(null);
     setJobStatus(null);
     setAudioUrl(null);
+    setTextUrl(null);
+    setPdfUrl(null);
+    pollStartTimeRef.current = 0;
 
     const result = await generateAudio(textToSpeak, selectedVoice, speed);
 
-    if (result) {
+    if (result && result.job_id) {
+      pollStartTimeRef.current = Date.now();
       setJobStatus({
         job_id: result.job_id,
         status: 'pending',
         progress: 0,
-        message: 'Iniciando...',
+        message: 'Iniciando geração de áudio...',
       });
     }
   };
@@ -196,6 +248,17 @@ function App() {
     setTextUrl(null);
     setPdfUrl(null);
     setError(null);
+    resetState();
+    pollStartTimeRef.current = 0;
+  };
+
+  // Handler para fechar erro e resetar se necessário
+  const handleCloseError = () => {
+    setError(null);
+    // Se estava gerando áudio e deu erro, reseta o jobStatus
+    if (jobStatus?.status === 'error') {
+      setJobStatus(null);
+    }
   };
 
   return (
@@ -215,7 +278,7 @@ function App() {
           <Alert
             type="error"
             message={error}
-            onClose={() => setError(null)}
+            onClose={handleCloseError}
           />
         )}
 

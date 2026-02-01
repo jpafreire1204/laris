@@ -1,11 +1,17 @@
 /**
  * Laris - API Hook
  * Hook para comunicação com o backend.
+ * Com timeouts e tratamento robusto de erros.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 const API_BASE = '/api';
+
+// Timeouts
+const REQUEST_TIMEOUT = 30000;  // 30s para requisições normais
+const POLL_TIMEOUT = 10000;     // 10s para polling de status
+const MAX_POLL_TIME = 660000;   // 11 minutos máximo de polling (backend tem 10min timeout)
 
 // Tipos
 export interface ExtractResponse {
@@ -68,10 +74,53 @@ export interface TranslationStatus {
   needs_download: string[];
 }
 
+export interface HealthStatus {
+  ok: boolean;
+  service: string;
+  active_jobs: number;
+  system: {
+    edge_tts_available: boolean;
+    pydub_available: boolean;
+    ffmpeg_available: boolean;
+  };
+}
+
+// Função auxiliar para fetch com timeout
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeout: number = REQUEST_TIMEOUT
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // Hook principal
 export function useApi() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pollStartTimeRef = useRef<number>(0);
+
+  // Verifica saúde do backend
+  const checkHealth = useCallback(async (): Promise<HealthStatus | null> => {
+    try {
+      const response = await fetchWithTimeout(`${API_BASE}/health`, {}, 5000);
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Extrai texto de arquivo
   const extractText = useCallback(async (file: File): Promise<ExtractResponse | null> => {
@@ -82,10 +131,11 @@ export function useApi() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(`${API_BASE}/extract`, {
-        method: 'POST',
-        body: formData,
-      });
+      const response = await fetchWithTimeout(
+        `${API_BASE}/extract`,
+        { method: 'POST', body: formData },
+        60000  // 60s para upload de arquivo
+      );
 
       const data: ExtractResponse = await response.json();
 
@@ -96,7 +146,11 @@ export function useApi() {
 
       return data;
     } catch (err) {
-      setError('Erro de conexão. Verifique se o servidor está rodando.');
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('A extração demorou muito. Tente um arquivo menor.');
+      } else {
+        setError('Erro de conexão. Verifique se o servidor está rodando.');
+      }
       return null;
     } finally {
       setLoading(false);
@@ -112,14 +166,15 @@ export function useApi() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/translate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          source_language: sourceLanguage,
-        }),
-      });
+      const response = await fetchWithTimeout(
+        `${API_BASE}/translate`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, source_language: sourceLanguage }),
+        },
+        120000  // 2 minutos para tradução
+      );
 
       const data: TranslateResponse = await response.json();
 
@@ -130,7 +185,11 @@ export function useApi() {
 
       return data;
     } catch (err) {
-      setError('Erro de conexão ao traduzir.');
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('A tradução demorou muito. Tente novamente.');
+      } else {
+        setError('Erro de conexão ao traduzir.');
+      }
       return null;
     } finally {
       setLoading(false);
@@ -140,7 +199,7 @@ export function useApi() {
   // Lista vozes disponíveis
   const getVoices = useCallback(async (): Promise<Voice[]> => {
     try {
-      const response = await fetch(`${API_BASE}/voices`);
+      const response = await fetchWithTimeout(`${API_BASE}/voices`, {}, 10000);
       const data: VoicesResponse = await response.json();
       return data.voices || [];
     } catch {
@@ -156,40 +215,88 @@ export function useApi() {
   ): Promise<TTSResponse | null> => {
     setLoading(true);
     setError(null);
+    pollStartTimeRef.current = Date.now();
 
     try {
-      const response = await fetch(`${API_BASE}/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          voice_id: voiceId,
-          speed,
-        }),
-      });
+      const response = await fetchWithTimeout(
+        `${API_BASE}/tts`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, voice_id: voiceId, speed }),
+        },
+        REQUEST_TIMEOUT
+      );
 
       const data: TTSResponse = await response.json();
 
       if (!data.success) {
-        setError(data.error || 'Erro ao gerar áudio');
+        setError(data.error || 'Erro ao iniciar geração de áudio');
+        setLoading(false);
         return null;
       }
 
       return data;
     } catch (err) {
-      setError('Erro de conexão ao gerar áudio.');
-      return null;
-    } finally {
       setLoading(false);
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('Erro de conexão ao iniciar geração. Tente novamente.');
+      } else {
+        setError('Erro de conexão ao gerar áudio.');
+      }
+      return null;
     }
+    // Nota: loading continua true para o polling
   }, []);
 
   // Verifica status do job
   const checkJobStatus = useCallback(async (jobId: string): Promise<JobStatus | null> => {
     try {
-      const response = await fetch(`${API_BASE}/tts/status/${jobId}`);
-      return await response.json();
-    } catch {
+      // Verifica tempo máximo de polling
+      const elapsedPollTime = Date.now() - pollStartTimeRef.current;
+      if (pollStartTimeRef.current > 0 && elapsedPollTime > MAX_POLL_TIME) {
+        setError('O processamento demorou muito. Por favor, tente novamente com um texto menor.');
+        setLoading(false);
+        return {
+          job_id: jobId,
+          status: 'error',
+          progress: 0,
+          message: 'Tempo limite excedido',
+          error: 'O processamento demorou muito. Por favor, tente novamente.'
+        };
+      }
+
+      const response = await fetchWithTimeout(
+        `${API_BASE}/tts/status/${jobId}`,
+        {},
+        POLL_TIMEOUT
+      );
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          setError('Job não encontrado. Tente gerar novamente.');
+          setLoading(false);
+          return null;
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const status: JobStatus = await response.json();
+
+      // Se completou ou erro, para o loading
+      if (status.status === 'completed' || status.status === 'error') {
+        setLoading(false);
+        pollStartTimeRef.current = 0;
+
+        if (status.status === 'error' && status.error) {
+          setError(status.error);
+        }
+      }
+
+      return status;
+    } catch (err) {
+      // Não seta erro em falhas de polling individual, apenas loga
+      console.warn('Erro ao verificar status:', err);
       return null;
     }
   }, []);
@@ -197,7 +304,7 @@ export function useApi() {
   // Verifica status dos pacotes de tradução
   const checkTranslationStatus = useCallback(async (): Promise<TranslationStatus | null> => {
     try {
-      const response = await fetch(`${API_BASE}/translate/status`);
+      const response = await fetchWithTimeout(`${API_BASE}/translate/status`, {}, 10000);
       return await response.json();
     } catch {
       return null;
@@ -213,14 +320,15 @@ export function useApi() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/translate/install`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from_code: fromCode,
-          to_code: toCode,
-        }),
-      });
+      const response = await fetchWithTimeout(
+        `${API_BASE}/translate/install`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from_code: fromCode, to_code: toCode }),
+        },
+        300000  // 5 minutos para instalação
+      );
 
       const data = await response.json();
 
@@ -231,17 +339,30 @@ export function useApi() {
 
       return true;
     } catch (err) {
-      setError('Erro de conexão ao instalar pacote.');
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('A instalação demorou muito. Tente novamente.');
+      } else {
+        setError('Erro de conexão ao instalar pacote.');
+      }
       return false;
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Reseta estado de erro e loading
+  const resetState = useCallback(() => {
+    setLoading(false);
+    setError(null);
+    pollStartTimeRef.current = 0;
+  }, []);
+
   return {
     loading,
     error,
     setError,
+    resetState,
+    checkHealth,
     extractText,
     translateText,
     getVoices,
