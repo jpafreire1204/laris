@@ -1,6 +1,6 @@
 /**
  * Laris - Header Component
- * Cabeçalho com controles de acessibilidade.
+ * Cabeçalho moderno com controles de acessibilidade.
  */
 
 import React from 'react';
@@ -35,7 +35,7 @@ export function Header({
   };
 
   return (
-    <header style={{ marginBottom: 'var(--spacing-lg)' }}>
+    <header style={{ marginBottom: 'var(--spacing-xl)' }}>
       {/* Skip link para acessibilidade */}
       <a href="#main-content" className="skip-link">
         Pular para o conteúdo principal
@@ -47,49 +47,117 @@ export function Header({
         alignItems: 'center',
         flexWrap: 'wrap',
         gap: 'var(--spacing-md)',
+        padding: 'var(--spacing-md) 0',
       }}>
-        <div>
-          <h1 style={{ marginBottom: 'var(--spacing-xs)' }}>
-            Laris
-          </h1>
-          <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-lg)' }}>
-            Artigos em Áudio
-          </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
+          {/* Logo/Icon */}
+          <div style={{
+            width: '48px',
+            height: '48px',
+            background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-hover))',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '24px',
+            boxShadow: 'var(--shadow-md)',
+          }}>
+            🔊
+          </div>
+          <div>
+            <h1 style={{
+              marginBottom: 0,
+              fontSize: 'var(--font-size-xl)',
+              fontWeight: 700,
+              background: 'linear-gradient(135deg, var(--color-text), var(--color-text-secondary))',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: contrast === 'super' ? 'var(--color-text)' : 'transparent',
+              backgroundClip: 'text',
+            }}>
+              Laris
+            </h1>
+            <p style={{
+              color: 'var(--color-text-muted)',
+              fontSize: 'var(--font-size-sm)',
+              margin: 0,
+            }}>
+              Artigos em Áudio
+            </p>
+          </div>
         </div>
 
-        <div className="accessibility-controls" role="group" aria-label="Controles de acessibilidade">
+        <div
+          className="accessibility-controls"
+          role="group"
+          aria-label="Controles de acessibilidade"
+          style={{
+            display: 'flex',
+            gap: 'var(--spacing-xs)',
+            background: 'var(--color-bg-hover)',
+            padding: 'var(--spacing-xs)',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
           <button
             onClick={handleDecrease}
-            className="btn btn-secondary"
+            style={{
+              padding: 'var(--spacing-sm) var(--spacing-md)',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              color: 'var(--color-text)',
+              fontWeight: 600,
+              fontSize: 'var(--font-size-sm)',
+              transition: 'background var(--transition)',
+            }}
             aria-label="Diminuir tamanho da fonte"
-            title="Diminuir fonte (Ctrl+-)"
+            title="Diminuir fonte"
+            onMouseOver={(e) => e.currentTarget.style.background = 'var(--color-bg)'}
+            onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
           >
             A-
           </button>
           <button
             onClick={handleIncrease}
-            className="btn btn-secondary"
+            style={{
+              padding: 'var(--spacing-sm) var(--spacing-md)',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              color: 'var(--color-text)',
+              fontWeight: 600,
+              fontSize: 'var(--font-size-sm)',
+              transition: 'background var(--transition)',
+            }}
             aria-label="Aumentar tamanho da fonte"
-            title="Aumentar fonte (Ctrl++)"
+            title="Aumentar fonte"
+            onMouseOver={(e) => e.currentTarget.style.background = 'var(--color-bg)'}
+            onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
           >
             A+
           </button>
           <button
             onClick={toggleContrast}
-            className="btn btn-secondary"
+            style={{
+              padding: 'var(--spacing-sm) var(--spacing-md)',
+              background: contrast === 'super' ? 'var(--color-primary)' : 'transparent',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              cursor: 'pointer',
+              color: contrast === 'super' ? '#fff' : 'var(--color-text)',
+              fontWeight: 600,
+              fontSize: 'var(--font-size-sm)',
+              transition: 'all var(--transition)',
+            }}
             aria-label={contrast === 'normal' ? 'Ativar super contraste' : 'Desativar super contraste'}
             title="Alternar contraste"
           >
-            {contrast === 'normal' ? 'Super Contraste' : 'Contraste Normal'}
+            {contrast === 'normal' ? 'Alto Contraste' : 'Contraste ON'}
           </button>
         </div>
       </div>
-
-      <hr style={{
-        border: 'none',
-        borderTop: '2px solid var(--color-border)',
-        margin: 'var(--spacing-lg) 0',
-      }} />
     </header>
   );
 }

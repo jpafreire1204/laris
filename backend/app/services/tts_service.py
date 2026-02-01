@@ -18,8 +18,8 @@ import uuid
 logger = logging.getLogger(__name__)
 
 # Configurações de timeout
-CHUNK_TIMEOUT_SECONDS = 60  # Timeout por chunk (60s)
-TOTAL_JOB_TIMEOUT_SECONDS = 600  # Timeout total do job (10 min)
+CHUNK_TIMEOUT_SECONDS = 120  # Timeout por chunk (2 min)
+TOTAL_JOB_TIMEOUT_SECONDS = 900  # Timeout total do job (15 min)
 
 
 def check_pydub_available() -> bool:

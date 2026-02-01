@@ -13,8 +13,8 @@ import { GenerateCard } from './components/GenerateCard';
 import { Alert } from './components/Alert';
 import { useApi, Voice, JobStatus, ExtractResponse } from './hooks/useApi';
 
-// Tempo máximo de polling (11 minutos - backend tem 10min timeout)
-const MAX_POLL_TIME_MS = 660000;
+// Tempo máximo de polling (16 minutos - backend tem 15min timeout)
+const MAX_POLL_TIME_MS = 960000;
 
 function App() {
   // Acessibilidade

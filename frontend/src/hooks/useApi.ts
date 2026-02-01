@@ -11,7 +11,7 @@ const API_BASE = '/api';
 // Timeouts
 const REQUEST_TIMEOUT = 30000;  // 30s para requisições normais
 const POLL_TIMEOUT = 10000;     // 10s para polling de status
-const MAX_POLL_TIME = 660000;   // 11 minutos máximo de polling (backend tem 10min timeout)
+const MAX_POLL_TIME = 960000;   // 16 minutos máximo de polling (backend tem 15min timeout)
 
 // Tipos
 export interface ExtractResponse {
