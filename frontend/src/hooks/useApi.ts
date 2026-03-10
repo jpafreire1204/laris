@@ -5,13 +5,39 @@
 
 import { useState, useCallback, useRef } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_URL
-  ? `${import.meta.env.VITE_API_URL}/api`
-  : '/api';
+const DEFAULT_API_URL = 'https://laris-api.vercel.app';
+const rawApiUrl = import.meta.env.VITE_API_URL?.trim();
+const normalizedApiUrl = (rawApiUrl || DEFAULT_API_URL).replace(/\/+$/, '');
+const API_BASE = `${normalizedApiUrl}/api`;
 
 const REQUEST_TIMEOUT = 30000;
 const POLL_TIMEOUT = 15000;
 const MAX_POLL_TIME = 3600000;
+
+function getConnectionErrorMessage() {
+  if (!rawApiUrl) {
+    return 'Servico indisponivel no momento. Tente novamente em alguns instantes.';
+  }
+
+  return 'Nao foi possivel conectar com o servidor. Verifique sua conexao e tente novamente em alguns instantes.';
+}
+
+async function parseApiResponse<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get('content-type') || '';
+  const isJson = contentType.includes('application/json');
+  const payload = isJson ? await response.json() : null;
+
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+        ? payload.error
+        : `Erro na comunicacao com a API (${response.status}).`;
+
+    throw new Error(message);
+  }
+
+  return payload as T;
+}
 
 // Tipos
 export interface ExtractResponse {
@@ -101,7 +127,7 @@ export function useApi() {
         60000
       );
 
-      const data: ExtractResponse = await response.json();
+      const data = await parseApiResponse<ExtractResponse>(response);
 
       if (!data.success) {
         setError(data.error || 'Erro ao extrair texto');
@@ -112,8 +138,10 @@ export function useApi() {
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         setError('A extracao demorou muito. Tente um arquivo menor.');
+      } else if (err instanceof Error && err.message) {
+        setError(err.message);
       } else {
-        setError('Erro de conexao. Verifique se o servidor esta rodando.');
+        setError(getConnectionErrorMessage());
       }
       return null;
     } finally {
@@ -125,7 +153,7 @@ export function useApi() {
   const getVoices = useCallback(async (): Promise<Voice[]> => {
     try {
       const response = await fetchWithTimeout(`${API_BASE}/voices`, {}, 10000);
-      const data: VoicesResponse = await response.json();
+      const data = await parseApiResponse<VoicesResponse>(response);
       return data.voices || [];
     } catch {
       return [];
@@ -156,7 +184,7 @@ export function useApi() {
         REQUEST_TIMEOUT
       );
 
-      const data: TTSResponse = await response.json();
+      const data = await parseApiResponse<TTSResponse>(response);
 
       if (!data.success) {
         setError(data.error || 'Erro ao iniciar geracao de audio');
@@ -168,9 +196,11 @@ export function useApi() {
     } catch (err) {
       setLoading(false);
       if (err instanceof Error && err.name === 'AbortError') {
-        setError('Erro de conexao ao iniciar geracao. Tente novamente.');
+        setError('A API demorou para responder. Tente novamente em alguns instantes.');
+      } else if (err instanceof Error && err.message) {
+        setError(err.message);
       } else {
-        setError('Erro de conexao ao gerar audio.');
+        setError(getConnectionErrorMessage());
       }
       return null;
     }
@@ -204,10 +234,11 @@ export function useApi() {
           setLoading(false);
           return null;
         }
+        setError(`Erro ao consultar o processamento (${response.status}). Tente novamente.`);
         return null;
       }
 
-      const status: JobStatus = await response.json();
+      const status = await parseApiResponse<JobStatus>(response);
 
       if (status.status === 'completed' || status.status === 'error') {
         setLoading(false);

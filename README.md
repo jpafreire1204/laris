@@ -79,6 +79,12 @@ cd frontend
 npm install
 ```
 
+Se quiser definir a API explicitamente no frontend, crie `frontend/.env.local` com:
+
+```bash
+VITE_API_URL=https://laris-api.vercel.app
+```
+
 ---
 
 ## Como usar
@@ -114,6 +120,22 @@ Acesse http://localhost:8001/api/health e verifique:
   }
 }
 ```
+
+## Deploy na Vercel
+
+No projeto do frontend na Vercel, configure a variavel de ambiente abaixo:
+
+```bash
+VITE_API_URL=https://laris-api.vercel.app
+```
+
+Passos:
+
+1. Abra o projeto do frontend na Vercel.
+2. Entre em `Settings > Environment Variables`.
+3. Adicione `VITE_API_URL`.
+4. Use o valor `https://laris-api.vercel.app`.
+5. Salve as alteracoes e faca um novo deploy.
 
 ### Passo a passo
 
