@@ -15,7 +15,26 @@ logger = logging.getLogger(__name__)
 
 # Diretório base do projeto (2 níveis acima de app/utils)
 BASE_DIR = Path(__file__).parent.parent.parent.parent
-OUTPUTS_DIR = BASE_DIR / "outputs"
+
+
+def get_outputs_dir() -> Path:
+    """Resolve o diretÃ³rio de saÃ­da para ambiente local ou serverless."""
+    custom_output_dir = os.environ.get("OUTPUTS_DIR")
+    if custom_output_dir:
+        return Path(custom_output_dir)
+
+    if os.environ.get("VERCEL") or os.environ.get("RAILWAY_PROJECT_ID"):
+        temp_root = Path(
+            os.environ.get("VERCEL_TMPDIR")
+            or os.environ.get("TMPDIR")
+            or "/tmp"
+        )
+        return temp_root / "laris-outputs"
+
+    return BASE_DIR / "outputs"
+
+
+OUTPUTS_DIR = get_outputs_dir()
 
 
 def ensure_outputs_dir() -> Path:

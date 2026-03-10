@@ -95,7 +95,7 @@ VITE_API_URL=https://laris-api.vercel.app
 ```bash
 cd backend
 venv\Scripts\activate  # ou: source venv/bin/activate
-python -m uvicorn app.main:app --reload --port 8001
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 **Terminal 2 - Frontend:**
@@ -108,7 +108,7 @@ O navegador abrirá em `http://localhost:5173` (ou porta indicada pelo Vite)
 
 ### Verificar Instalação
 
-Acesse http://localhost:8001/api/health e verifique:
+Acesse http://localhost:8000/api/health e verifique:
 
 ```json
 {
@@ -136,6 +136,30 @@ Passos:
 3. Adicione `VITE_API_URL`.
 4. Use o valor `https://laris-api.vercel.app`.
 5. Salve as alteracoes e faca um novo deploy.
+
+## Deploy do Backend na Railway
+
+O backend FastAPI pode ser publicado na Railway usando o arquivo `railway.json`.
+
+Comando de start:
+
+```bash
+cd backend && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
+Passos:
+
+1. Crie um novo projeto na Railway e importe este repositorio.
+2. Mantenha o deploy com o `railway.json` da raiz do projeto.
+3. Configure `CORS_ORIGINS` com a URL publica do frontend.
+4. Se quiser forcar o diretorio de trabalho para arquivos gerados, defina `OUTPUTS_DIR=/tmp/laris-outputs`.
+5. Depois do deploy, valide o endpoint `GET /health`.
+
+Observacoes:
+
+- A Railway injeta a variavel `PORT`, e o comando usa `8000` como fallback local.
+- O backend ja expõe `GET /health` para uptime checks.
+- Em ambiente de deploy, os arquivos temporarios usam `OUTPUTS_DIR`, `TMPDIR` ou `/tmp`.
 
 ### Passo a passo
 
