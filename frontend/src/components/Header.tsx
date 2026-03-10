@@ -54,13 +54,16 @@ export function Header({
           <div style={{
             width: '48px',
             height: '48px',
-            background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-hover))',
+            background: contrast === 'super'
+              ? '#ffff00'
+              : 'linear-gradient(135deg, var(--color-primary), var(--color-primary-hover))',
             borderRadius: 'var(--radius-md)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontSize: '24px',
             boxShadow: 'var(--shadow-md)',
+            border: contrast === 'super' ? '2px solid #ffff00' : 'none',
           }}>
             🔊
           </div>
@@ -81,7 +84,7 @@ export function Header({
               fontSize: 'var(--font-size-sm)',
               margin: 0,
             }}>
-              Artigos em Áudio
+              Texto em Audio
             </p>
           </div>
         </div>
@@ -93,9 +96,10 @@ export function Header({
           style={{
             display: 'flex',
             gap: 'var(--spacing-xs)',
-            background: 'var(--color-bg-hover)',
+            background: contrast === 'super' ? '#111111' : 'var(--color-bg-hover)',
             padding: 'var(--spacing-xs)',
             borderRadius: 'var(--radius-md)',
+            border: contrast === 'super' ? '1px solid #444444' : 'none',
           }}
         >
           <button
@@ -103,7 +107,7 @@ export function Header({
             style={{
               padding: 'var(--spacing-sm) var(--spacing-md)',
               background: 'transparent',
-              border: 'none',
+              border: contrast === 'super' ? '1px solid #555' : 'none',
               borderRadius: 'var(--radius-sm)',
               cursor: 'pointer',
               color: 'var(--color-text)',
@@ -113,7 +117,7 @@ export function Header({
             }}
             aria-label="Diminuir tamanho da fonte"
             title="Diminuir fonte"
-            onMouseOver={(e) => e.currentTarget.style.background = 'var(--color-bg)'}
+            onMouseOver={(e) => e.currentTarget.style.background = contrast === 'super' ? '#1a1a1a' : 'var(--color-bg)'}
             onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
           >
             A-
@@ -123,7 +127,7 @@ export function Header({
             style={{
               padding: 'var(--spacing-sm) var(--spacing-md)',
               background: 'transparent',
-              border: 'none',
+              border: contrast === 'super' ? '1px solid #555' : 'none',
               borderRadius: 'var(--radius-sm)',
               cursor: 'pointer',
               color: 'var(--color-text)',
@@ -133,7 +137,7 @@ export function Header({
             }}
             aria-label="Aumentar tamanho da fonte"
             title="Aumentar fonte"
-            onMouseOver={(e) => e.currentTarget.style.background = 'var(--color-bg)'}
+            onMouseOver={(e) => e.currentTarget.style.background = contrast === 'super' ? '#1a1a1a' : 'var(--color-bg)'}
             onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
           >
             A+
@@ -142,12 +146,12 @@ export function Header({
             onClick={toggleContrast}
             style={{
               padding: 'var(--spacing-sm) var(--spacing-md)',
-              background: contrast === 'super' ? 'var(--color-primary)' : 'transparent',
-              border: 'none',
+              background: contrast === 'super' ? '#ffff00' : 'transparent',
+              border: contrast === 'super' ? '2px solid #ffff00' : 'none',
               borderRadius: 'var(--radius-sm)',
               cursor: 'pointer',
-              color: contrast === 'super' ? '#fff' : 'var(--color-text)',
-              fontWeight: 600,
+              color: contrast === 'super' ? '#000000' : 'var(--color-text)',
+              fontWeight: 700,
               fontSize: 'var(--font-size-sm)',
               transition: 'all var(--transition)',
             }}

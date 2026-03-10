@@ -28,6 +28,7 @@ class ExtractResponse(BaseModel):
     is_portuguese: bool = False
     char_count: int = 0
     error: Optional[str] = None
+    file_id: Optional[str] = None  # ID do PDF original (para manter layout)
 
 
 class TranslateRequest(BaseModel):
@@ -64,6 +65,9 @@ class TTSRequest(BaseModel):
     text: str
     voice_id: str = "pt-BR-FranciscaNeural"  # Voz padrão feminina
     speed: float = Field(default=1.0, ge=0.5, le=2.0)  # 0.5x a 2x
+    file_id: Optional[str] = None
+    skip_translation: bool = False
+    filename: Optional[str] = None
 
 
 class TTSResponse(BaseModel):
@@ -89,10 +93,14 @@ class JobStatusResponse(BaseModel):
     progress: int = 0  # 0-100
     message: str = ""
     audio_url: Optional[str] = None
-    audio_mode: AudioMode = AudioMode.SINGLE  # "single" ou "parts"
+    audio_mode: AudioMode = AudioMode.SINGLE  # sempre "single" agora
     text_url: Optional[str] = None
     pdf_url: Optional[str] = None
     error: Optional[str] = None
+    # Campos de tradução
+    detected_language: Optional[str] = None  # código do idioma (en, pt, es, etc.)
+    language_name: Optional[str] = None  # nome do idioma (Inglês, Português, etc.)
+    translation_skipped: Optional[bool] = None  # True se texto já era PT-BR
 
 
 class TranslationPackageStatus(BaseModel):

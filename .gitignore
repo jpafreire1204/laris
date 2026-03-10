@@ -22,6 +22,7 @@ wheels/
 
 # Virtual Environment
 venv/
+**/venv/
 ENV/
 env/
 .venv/
@@ -47,9 +48,8 @@ build/
 .DS_Store
 Thumbs.db
 
-# Outputs (keep directory, ignore files)
-outputs/*
-!outputs/.gitkeep
+# Outputs
+outputs/
 
 # Logs
 *.log
@@ -57,7 +57,15 @@ outputs/*
 # Environment variables
 .env
 .env.local
+.env.*.local
 
 # Cache
 .cache/
 .pytest_cache/
+
+# Audio files
+*.mp3
+*.wav
+
+# Vite
+frontend/.vite/

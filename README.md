@@ -6,9 +6,9 @@ Converta artigos científicos em áudio narrado. Desenvolvido com foco em **aces
 
 1. **Extrai texto** de PDFs, DOCX ou TXT
 2. **Detecta o idioma** automaticamente
-3. **Traduz para português** (se necessário) - funciona offline
+3. **Traduz para português** (se necessário) - usando Google Translate
 4. **Gera narração em voz** natural (PT-BR, feminino ou masculino)
-5. **Permite baixar** o áudio (MP3) e o texto traduzido (TXT)
+5. **Sempre entrega um único MP3** (mesmo para textos longos)
 
 Tudo com poucos cliques, interface limpa, botões grandes, alto contraste.
 
@@ -16,16 +16,23 @@ Tudo com poucos cliques, interface limpa, botões grandes, alto contraste.
 
 ## Requisitos
 
-- **Python 3.11+** ([Download](https://python.org))
+- **Python 3.10+** ([Download](https://python.org))
 - **Node.js 18+** ([Download](https://nodejs.org))
-- **FFmpeg** (opcional, para textos muito longos)
+- **FFmpeg** (obrigatório para textos longos)
 
 ### Instalando FFmpeg
 
 **Windows:**
-```bash
-winget install FFmpeg
-```
+1. Baixe de https://github.com/BtbN/FFmpeg-Builds/releases (escolha `ffmpeg-master-latest-win64-gpl.zip`)
+2. Extraia para `C:\ffmpeg`
+3. Adicione `C:\ffmpeg\bin` ao PATH:
+   - Pesquise "variáveis de ambiente" no Windows
+   - Clique em "Editar variáveis de ambiente do sistema"
+   - Clique em "Variáveis de Ambiente"
+   - Na seção "Variáveis do sistema", selecione "Path" e clique em "Editar"
+   - Clique em "Novo" e adicione `C:\ffmpeg\bin`
+   - Clique OK em todas as janelas
+4. Reinicie o terminal e teste: `ffmpeg -version`
 
 **macOS:**
 ```bash
@@ -47,17 +54,29 @@ sudo apt install ffmpeg
 cd laris
 ```
 
-### 2. Instale as dependências
+### 2. Backend
 
-**Windows:**
 ```bash
-setup.bat
+cd backend
+
+# Criar ambiente virtual
+python -m venv venv
+
+# Ativar (Windows)
+venv\Scripts\activate
+
+# Ativar (macOS/Linux)
+source venv/bin/activate
+
+# Instalar dependências
+pip install -r requirements.txt
 ```
 
-**macOS/Linux:**
+### 3. Frontend
+
 ```bash
-chmod +x setup.sh
-./setup.sh
+cd frontend
+npm install
 ```
 
 ---
@@ -66,25 +85,42 @@ chmod +x setup.sh
 
 ### Iniciar o Laris
 
-**Windows:**
+**Terminal 1 - Backend:**
 ```bash
-run.bat
+cd backend
+venv\Scripts\activate  # ou: source venv/bin/activate
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
-**macOS/Linux:**
+**Terminal 2 - Frontend:**
 ```bash
-chmod +x run.sh
-./run.sh
+cd frontend
+npm run dev
 ```
 
-O navegador abrirá automaticamente em `http://localhost:5173`
+O navegador abrirá em `http://localhost:5173` (ou porta indicada pelo Vite)
+
+### Verificar Instalação
+
+Acesse http://localhost:8001/api/health e verifique:
+
+```json
+{
+  "ok": true,
+  "system": {
+    "edge_tts_available": true,
+    "ffmpeg_available": true,
+    "google_translate_available": true
+  }
+}
+```
 
 ### Passo a passo
 
 1. **Envie seu arquivo** (PDF, DOCX ou TXT)
-2. **Confirme a tradução** (se o texto não estiver em português)
-3. **Escolha a voz** (feminina ou masculina) e ajuste a velocidade
-4. **Clique em "Gerar Áudio"**
+2. **Veja o idioma detectado** (ex: "Inglês")
+3. **Clique em "Gerar Áudio"**
+4. **Aguarde a tradução e geração** (progresso mostrado em tempo real)
 5. **Baixe o MP3** ou ouça diretamente no navegador
 
 ---
@@ -125,39 +161,32 @@ O PDF pode estar:
 
 **Solução:** Copie o texto do PDF manualmente e salve como `.txt`
 
-### "Pacote de tradução não instalado"
+### "ffmpeg não está instalado"
 
-Na primeira vez que você traduzir, o Laris precisa baixar o modelo de tradução (~100 MB).
+Para textos longos, o Laris precisa do ffmpeg para concatenar as partes do áudio em um único MP3.
 
-Clique em **"Instalar pacote de tradução"** e aguarde.
+Siga as instruções de instalação do FFmpeg acima.
 
-### Áudio em partes (ZIP)
+### "Serviço de tradução não disponível"
 
-Para textos muito longos, o Laris precisa dividir o áudio em partes.
-
-- **Com FFmpeg/pydub instalados:** O Laris concatena automaticamente em um único MP3
-- **Sem FFmpeg/pydub:** O Laris gera um ZIP com as partes separadas (parte_01.mp3, parte_02.mp3, etc.)
-
-Para ter áudio único, instale FFmpeg seguindo as instruções acima e também:
+Instale o deep-translator:
 
 ```bash
-pip install pydub
+pip install deep-translator
 ```
-
-**Nota:** O ZIP funciona perfeitamente. Basta extrair e tocar os arquivos em ordem.
 
 ### Erro de conexão
 
 Verifique se o backend está rodando:
-- Deve haver uma janela de terminal mostrando o servidor Uvicorn
+- Deve haver uma janela de terminal mostrando `Uvicorn running on http://127.0.0.1:8001`
 
 ---
 
 ## Privacidade
 
-- **Processamento local:** Seus arquivos não são enviados para servidores externos
-- **Tradução offline:** Usa Argos Translate, que funciona sem internet
-- **TTS:** Usa Microsoft Edge TTS, que **requer conexão com a internet** para gerar a voz
+- **Processamento local:** Extração de texto é feita localmente
+- **Tradução:** Usa Google Translate (requer internet)
+- **TTS:** Usa Microsoft Edge TTS (requer internet)
 
 ---
 
@@ -169,8 +198,12 @@ laris/
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── routes/
+│   │   │   ├── extract.py    # Extração de texto
+│   │   │   ├── tts.py        # Geração de áudio (com tradução)
+│   │   │   └── translate.py  # Tradução standalone
 │   │   ├── services/
-│   │   ├── models/
+│   │   │   ├── tts_service.py    # Lógica de TTS + ffmpeg
+│   │   │   └── translation.py    # Google Translate
 │   │   └── utils/
 │   ├── tests/
 │   └── requirements.txt
@@ -182,10 +215,6 @@ laris/
 │   │   └── styles/
 │   └── package.json
 ├── outputs/           # Arquivos gerados
-├── run.bat            # Iniciar (Windows)
-├── run.sh             # Iniciar (macOS/Linux)
-├── setup.bat          # Instalar (Windows)
-├── setup.sh           # Instalar (macOS/Linux)
 └── README.md
 ```
 
@@ -194,14 +223,14 @@ laris/
 ## Tecnologias
 
 **Backend:**
-- Python 3.11+
+- Python 3.10+
 - FastAPI
 - pypdf / pdfplumber (extração de PDF)
 - python-docx (extração de DOCX)
 - langdetect (detecção de idioma)
-- argostranslate (tradução offline)
-- edge-tts (síntese de voz)
-- pydub (processamento de áudio)
+- deep-translator (Google Translate)
+- edge-tts (síntese de voz Microsoft)
+- ffmpeg (concatenação de áudio)
 
 **Frontend:**
 - React 18
@@ -210,36 +239,29 @@ laris/
 
 ---
 
-## Executando os Testes
+## Teste Rápido
 
-```bash
-cd backend
-source venv/bin/activate  # ou: venv\Scripts\activate (Windows)
-pytest tests/ -v
-```
+1. Abra o app no navegador
+2. Faça upload de um PDF em inglês
+3. O sistema deve:
+   - Mostrar "Idioma detectado: Inglês"
+   - Mostrar "Traduzindo de Inglês para Português..."
+   - Mostrar "Gerando parte 1/N..."
+   - Mostrar "Juntando partes em 1 MP3..."
+4. Baixe e ouça o MP3 final
 
 ---
 
 ## Créditos
 
 - **Vozes:** Microsoft Edge Neural TTS
-- **Tradução:** Argos Translate (MIT License)
-- **Ícones:** Unicode Emoji
+- **Tradução:** Google Translate (via deep-translator)
 
 ---
 
 ## Licença
 
 MIT License - Use livremente, modifique, distribua.
-
----
-
-## Suporte
-
-Se encontrar problemas, verifique:
-1. Os logs no terminal do backend
-2. O console do navegador (F12)
-3. Se todas as dependências estão instaladas
 
 ---
 

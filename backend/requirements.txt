@@ -11,14 +11,11 @@ python-docx>=1.1.0
 # Language Detection
 langdetect>=1.0.9
 
-# Translation (offline) - using latest compatible version
-argostranslate>=1.9.6
+# Translation (Google Translate API - free, no API key needed)
+deep-translator>=1.11.4
 
-# TTS
+# TTS (Microsoft Edge Neural Voices)
 edge-tts>=6.1.9
-
-# Audio processing
-pydub>=0.25.1
 
 # PDF generation
 reportlab>=4.0.0

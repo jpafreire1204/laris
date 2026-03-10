@@ -70,15 +70,224 @@
 /* Modo Super Contraste */
 [data-contrast="super"] {
   --color-bg: #000000;
-  --color-bg-card: #1a1a1a;
-  --color-bg-hover: #2a2a2a;
+  --color-bg-card: #0a0a0a;
+  --color-bg-hover: #1a1a1a;
+
   --color-text: #ffff00;
   --color-text-secondary: #ffffff;
-  --color-text-muted: #cccccc;
+  --color-text-muted: #e0e0e0;
+
   --color-primary: #ffff00;
-  --color-primary-hover: #ffffff;
-  --color-border: #ffffff;
+  --color-primary-hover: #ffe600;
+  --color-primary-dark: #ccb800;
+
+  --color-success: #00ff41;
+  --color-success-light: #66ff8c;
+  --color-success-bg: rgba(0, 255, 65, 0.15);
+
+  --color-warning: #ffaa00;
+  --color-warning-light: #ffcc44;
+  --color-warning-bg: rgba(255, 170, 0, 0.15);
+
+  --color-error: #ff4444;
+  --color-error-light: #ff6666;
+  --color-error-bg: rgba(255, 68, 68, 0.2);
+
+  --color-border: #555555;
   --color-border-focus: #ffff00;
+
+  --shadow-sm: 0 0 0 1px rgba(255, 255, 0, 0.15);
+  --shadow-md: 0 0 0 1px rgba(255, 255, 0, 0.25);
+  --shadow-lg: 0 0 0 2px rgba(255, 255, 0, 0.25);
+
+  --focus-ring: 0 0 0 3px rgba(255, 255, 0, 0.6);
+}
+
+/* --- Alto Contraste: overrides especificos --- */
+
+/* Botoes primarios: texto preto em fundo amarelo */
+[data-contrast="super"] .btn-primary {
+  color: #000000;
+  border: 2px solid #ffff00;
+}
+[data-contrast="super"] .btn-primary:hover,
+[data-contrast="super"] .btn-primary:focus {
+  color: #000000;
+  background: #ffe600;
+  border-color: #ffffff;
+}
+[data-contrast="super"] .btn-primary:disabled {
+  background: #333333;
+  color: #777777;
+  border: 2px solid #444444;
+  opacity: 1;
+}
+
+/* Botao sucesso: texto preto em fundo verde */
+[data-contrast="super"] .btn-success {
+  background: #00ff41;
+  color: #000000;
+  border: 2px solid #00ff41;
+}
+[data-contrast="super"] .btn-success:hover {
+  background: #66ff8c;
+  color: #000000;
+}
+
+/* Botao secundario: borda visivel */
+[data-contrast="super"] .btn-secondary {
+  border: 2px solid #666666;
+  background: #1a1a1a;
+}
+[data-contrast="super"] .btn-secondary:hover,
+[data-contrast="super"] .btn-secondary:focus {
+  border-color: #ffff00;
+  background: #2a2a2a;
+}
+
+/* Cards: bordas mais grossas */
+[data-contrast="super"] .card {
+  border: 2px solid #444444;
+  box-shadow: none;
+}
+
+/* Steps */
+[data-contrast="super"] .steps::before {
+  background: #333333;
+  height: 3px;
+}
+[data-contrast="super"] .step-number {
+  border-width: 3px;
+}
+[data-contrast="super"] .step.active .step-number {
+  color: #000000;
+  border-color: #ffff00;
+}
+[data-contrast="super"] .step.completed .step-number {
+  background: #00ff41;
+  border-color: #00ff41;
+  color: #000000;
+}
+
+/* Upload area */
+[data-contrast="super"] .upload-area {
+  border: 3px dashed #555555;
+  background: #0a0a0a;
+}
+[data-contrast="super"] .upload-area:hover,
+[data-contrast="super"] .upload-area:focus-within {
+  border-color: #ffff00;
+  background: rgba(255, 255, 0, 0.05);
+}
+[data-contrast="super"] .upload-area.dragover {
+  border-color: #00ff41;
+  background: rgba(0, 255, 65, 0.1);
+}
+
+/* Text preview */
+[data-contrast="super"] .text-preview {
+  background: #0a0a0a;
+  border: 2px solid #444444;
+  color: #ffffff;
+}
+
+/* Alertas com bordas fortes */
+[data-contrast="super"] .alert-error {
+  background: rgba(255, 68, 68, 0.2);
+  border: 2px solid #ff4444;
+  color: #ff6666;
+}
+[data-contrast="super"] .alert-success {
+  background: rgba(0, 255, 65, 0.15);
+  border: 2px solid #00ff41;
+  color: #00ff41;
+}
+[data-contrast="super"] .alert-warning {
+  background: rgba(255, 170, 0, 0.15);
+  border: 2px solid #ffaa00;
+  color: #ffcc44;
+}
+
+/* Progress bar */
+[data-contrast="super"] .progress-container {
+  background: #222222;
+  border: 1px solid #444444;
+  height: 12px;
+}
+[data-contrast="super"] .progress-bar {
+  background: linear-gradient(90deg, #ffff00, #00ff41);
+}
+
+/* Slider */
+[data-contrast="super"] input[type="range"] {
+  background: #333333;
+  height: 8px;
+}
+[data-contrast="super"] input[type="range"]::-webkit-slider-thumb {
+  background: #ffff00;
+  border: 3px solid #000000;
+  width: 24px;
+  height: 24px;
+  box-shadow: 0 0 0 2px #ffff00;
+}
+[data-contrast="super"] input[type="range"]::-moz-range-thumb {
+  background: #ffff00;
+  border: 3px solid #000000;
+  width: 24px;
+  height: 24px;
+  box-shadow: 0 0 0 2px #ffff00;
+}
+
+/* Spinner */
+[data-contrast="super"] .spinner {
+  border-color: #333333;
+  border-top-color: #ffff00;
+  border-width: 3px;
+}
+
+/* Skip link */
+[data-contrast="super"] .skip-link {
+  background: #ffff00;
+  color: #000000;
+}
+
+/* Inputs e selects */
+[data-contrast="super"] input,
+[data-contrast="super"] textarea,
+[data-contrast="super"] select {
+  background: #0a0a0a;
+  border: 2px solid #555555;
+  color: #ffffff;
+}
+[data-contrast="super"] input:focus,
+[data-contrast="super"] textarea:focus,
+[data-contrast="super"] select:focus {
+  border-color: #ffff00;
+}
+[data-contrast="super"] select option {
+  background: #0a0a0a;
+  color: #ffffff;
+}
+
+/* Audio player inverte cores nativas */
+[data-contrast="super"] audio {
+  filter: invert(1) hue-rotate(180deg);
+  border: 2px solid #444444;
+  border-radius: var(--radius-md);
+}
+
+/* Links */
+[data-contrast="super"] a {
+  color: #ffff00;
+}
+[data-contrast="super"] a:hover,
+[data-contrast="super"] a:focus {
+  color: #ffffff;
+}
+
+/* Labels */
+[data-contrast="super"] label {
+  color: #ffff00;
 }
 
 /* Reset e Base */

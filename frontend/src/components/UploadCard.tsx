@@ -13,6 +13,7 @@ interface UploadCardProps {
 
 export function UploadCard({ onFileSelect, loading, disabled }: UploadCardProps) {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -78,6 +79,7 @@ export function UploadCard({ onFileSelect, loading, disabled }: UploadCardProps)
       return;
     }
 
+    setSelectedFileName(file.name);
     onFileSelect(file);
   };
 
@@ -120,19 +122,28 @@ export function UploadCard({ onFileSelect, loading, disabled }: UploadCardProps)
               Extraindo texto do arquivo...
             </p>
           </>
+        ) : selectedFileName ? (
+          <>
+            <div className="upload-icon" aria-hidden="true">
+              ✅
+            </div>
+            <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, marginBottom: 'var(--spacing-sm)' }}>
+              {selectedFileName}
+            </p>
+            <p style={{ color: 'var(--color-text-secondary)' }}>
+              Clique para trocar o arquivo
+            </p>
+          </>
         ) : (
           <>
             <div className="upload-icon" aria-hidden="true">
               📄
             </div>
             <p style={{ fontSize: 'var(--font-size-xl)', fontWeight: 600, marginBottom: 'var(--spacing-sm)' }}>
-              Clique aqui ou arraste o arquivo
+              Clique aqui para enviar o arquivo
             </p>
             <p style={{ color: 'var(--color-text-secondary)' }}>
               Formatos aceitos: PDF, DOCX, TXT
-            </p>
-            <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)', marginTop: 'var(--spacing-sm)' }}>
-              Atalho: Alt + U
             </p>
           </>
         )}

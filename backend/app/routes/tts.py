@@ -1,11 +1,13 @@
 """
 Laris - TTS Route
 Endpoints para geração de áudio (Text-to-Speech).
-Com timeouts robustos e tratamento de erros.
+Pipeline otimizado: < 5 minutos para textos longos.
+SEMPRE gera UM único arquivo MP3.
 """
 
 import asyncio
 import logging
+import re
 import uuid
 import time
 import traceback
@@ -21,13 +23,8 @@ from app.models.schemas import (
     JobStatus,
     AudioMode
 )
-from app.services.tts_service import (
-    generate_audio,
-    save_translated_text,
-    save_translated_pdf,
-    get_system_status,
-    TOTAL_JOB_TIMEOUT_SECONDS
-)
+from app.services.fast_pipeline import run_fast_pipeline, PerformanceMetrics
+from app.services.tts_service import get_system_status
 from app.utils.file_utils import ensure_outputs_dir, save_job_metadata, load_job_metadata, OUTPUTS_DIR
 
 router = APIRouter()
@@ -37,206 +34,155 @@ logger = logging.getLogger(__name__)
 jobs: Dict[str, Dict[str, Any]] = {}
 
 
-def update_job_progress(job_id: str, progress: int, message: str):
+def detect_language(text: str) -> str:
+    """Detecta o idioma do texto. Retorna código."""
+    try:
+        from langdetect import detect, DetectorFactory
+        DetectorFactory.seed = 0
+        return detect(text[:5000])
+    except Exception:
+        return 'unknown'
+
+
+def update_job_progress(job_id: str, progress: int, message: str, status: str = None):
     """Atualiza progresso do job."""
     if job_id in jobs:
         jobs[job_id]["progress"] = progress
         jobs[job_id]["message"] = message
+        if status:
+            jobs[job_id]["status"] = status
 
 
-async def process_tts_job(job_id: str, text: str, voice_id: str, speed: float):
+async def process_tts_job(job_id: str, text: str, voice_id: str, speed: float, file_id: str = None, skip_translation: bool = True):
     """
-    Processa um job de TTS em background com timeout total.
+    Processa um job de TTS usando pipeline otimizado.
+    Fluxo: detectar idioma → (traduzir se não skip) → TTS → concatenar → 1 MP3
+    Se file_id for fornecido, tenta criar PDF com layout preservado.
     """
-    job_start_time = time.time()
-    logger.info(f"[JOB {job_id}] ===== PROCESSO BACKGROUND INICIADO =====")
+    job_start = time.time()
+    logger.info(f"[JOB {job_id}] Iniciando pipeline - {len(text)} chars, file_id={file_id}")
 
     try:
-        # Atualiza status
-        jobs[job_id]["status"] = JobStatus.GENERATING_AUDIO
-        jobs[job_id]["message"] = "Gerando áudio... Isso pode levar alguns segundos."
-        jobs[job_id]["progress"] = 10
-        jobs[job_id]["started_at"] = job_start_time
+        # Detecta idioma silenciosamente
+        detected_lang = detect_language(text)
+        jobs[job_id]["detected_language"] = detected_lang
 
-        # Callback para atualizar progresso
-        def progress_callback(progress: int, message: str):
-            update_job_progress(job_id, progress, message)
+        # Prepara output
+        ensure_outputs_dir()
+        output_path = OUTPUTS_DIR / f"{job_id}_final.mp3"
 
-        # Gera áudio com timeout total
-        try:
-            audio_path, error, audio_mode = await asyncio.wait_for(
-                generate_audio(
-                    text=text,
-                    voice_id=voice_id,
-                    speed=speed,
-                    job_id=job_id,
-                    progress_callback=progress_callback
-                ),
-                timeout=TOTAL_JOB_TIMEOUT_SECONDS
-            )
-        except asyncio.TimeoutError:
-            elapsed = time.time() - job_start_time
-            error = f"Tempo limite excedido ({TOTAL_JOB_TIMEOUT_SECONDS}s). O texto pode ser muito longo."
-            audio_path = None
-            audio_mode = "single"
-            logger.error(f"[JOB {job_id}] Timeout total após {elapsed:.1f}s")
+        # Callback de progresso
+        def progress_callback(pct: int, msg: str):
+            update_job_progress(job_id, pct, msg, JobStatus.GENERATING_AUDIO)
 
-        if error:
+        # Executa pipeline otimizado
+        success, error, metrics, translated_text = await run_fast_pipeline(
+            text=text,
+            voice_id=voice_id,
+            speed=speed,
+            output_path=output_path,
+            job_id=job_id,
+            detected_lang=detected_lang,
+            progress_callback=progress_callback,
+            skip_translation=skip_translation
+        )
+
+        if not success:
             jobs[job_id]["status"] = JobStatus.ERROR
             jobs[job_id]["error"] = error
-            jobs[job_id]["message"] = f"Erro: {error}"
+            jobs[job_id]["message"] = "Erro no processamento"
             jobs[job_id]["completed_at"] = time.time()
-            logger.error(f"[JOB {job_id}] Falhou: {error}")
             save_job_metadata(job_id, jobs[job_id])
+            logger.error(f"[JOB {job_id}] Falhou: {error}")
             return
 
-        jobs[job_id]["progress"] = 80
-        jobs[job_id]["message"] = "Salvando arquivos de texto..."
-
-        # Salva texto TXT
-        text_path, text_error = save_translated_text(text, job_id=job_id)
-        if text_error:
-            logger.warning(f"[JOB {job_id}] Erro ao salvar TXT: {text_error}")
-
-        jobs[job_id]["progress"] = 90
-        jobs[job_id]["message"] = "Gerando PDF..."
-
-        # Salva texto PDF
-        pdf_path, pdf_error = save_translated_pdf(text, title="Artigo Traduzido", job_id=job_id)
-        if pdf_error:
-            logger.warning(f"[JOB {job_id}] Erro ao salvar PDF: {pdf_error}")
-
-        # Finaliza com sucesso
+        # Finaliza
+        elapsed = time.time() - job_start
         jobs[job_id]["status"] = JobStatus.COMPLETED
         jobs[job_id]["progress"] = 100
-        jobs[job_id]["audio_mode"] = audio_mode
-        jobs[job_id]["audio_path"] = str(audio_path) if audio_path else None
-        jobs[job_id]["text_path"] = str(text_path) if text_path else None
-        jobs[job_id]["pdf_path"] = str(pdf_path) if pdf_path else None
+        jobs[job_id]["message"] = "Pronto!"
+        jobs[job_id]["audio_mode"] = "single"
+        jobs[job_id]["audio_path"] = str(output_path)
+        jobs[job_id]["audio_url"] = f"/api/download/audio/{job_id}"
         jobs[job_id]["completed_at"] = time.time()
+        jobs[job_id]["metrics"] = {
+            "tts_ms": metrics.tts_ms,
+            "merge_ms": metrics.merge_ms,
+            "total_ms": metrics.total_ms,
+            "chunks": metrics.chunks_count,
+        }
 
-        if audio_mode == "parts":
-            jobs[job_id]["message"] = "Áudio gerado em partes! Baixe o ZIP para ouvir."
-            jobs[job_id]["audio_url"] = f"/api/download/audio-parts/{job_id}"
-        else:
-            jobs[job_id]["message"] = "Áudio gerado com sucesso!"
-            jobs[job_id]["audio_url"] = f"/api/download/audio/{job_id}"
-
-        jobs[job_id]["text_url"] = f"/api/download/text/{job_id}"
-        jobs[job_id]["pdf_url"] = f"/api/download/pdf/{job_id}"
-
-        # Salva metadados
         save_job_metadata(job_id, jobs[job_id])
-
-        elapsed = time.time() - job_start_time
-        logger.info(f"[JOB {job_id}] ===== PROCESSO BACKGROUND CONCLUÍDO em {elapsed:.1f}s (mode={audio_mode}) =====")
+        logger.info(f"[JOB {job_id}] Concluído em {elapsed:.1f}s")
 
     except Exception as e:
-        elapsed = time.time() - job_start_time
-        error_msg = str(e)
-        logger.error(f"[JOB {job_id}] Erro inesperado após {elapsed:.1f}s: {error_msg}\n{traceback.format_exc()}")
-
+        elapsed = time.time() - job_start
+        logger.error(f"[JOB {job_id}] Erro após {elapsed:.1f}s: {e}\n{traceback.format_exc()}")
         jobs[job_id]["status"] = JobStatus.ERROR
-        jobs[job_id]["error"] = error_msg
-        jobs[job_id]["message"] = f"Erro inesperado: {error_msg}"
+        jobs[job_id]["error"] = str(e)
+        jobs[job_id]["message"] = "Erro inesperado"
         jobs[job_id]["completed_at"] = time.time()
         save_job_metadata(job_id, jobs[job_id])
 
 
 @router.get("/health")
 async def health_check():
-    """
-    Endpoint de saúde para diagnóstico.
-    Retorna status do sistema e disponibilidade dos serviços.
-    """
+    """Endpoint de saúde."""
     status = get_system_status()
-
-    # Conta jobs ativos
-    active_jobs = sum(1 for j in jobs.values() if j.get("status") not in [JobStatus.COMPLETED, JobStatus.ERROR])
+    active = sum(1 for j in jobs.values() if j.get("status") not in [JobStatus.COMPLETED, JobStatus.ERROR])
 
     return JSONResponse({
         "ok": True,
         "service": "laris-tts",
-        "timestamp": time.time(),
-        "active_jobs": active_jobs,
-        "total_jobs_in_memory": len(jobs),
-        "system": status,
-        "timeouts": {
-            "chunk_timeout_seconds": 60,
-            "total_job_timeout_seconds": TOTAL_JOB_TIMEOUT_SECONDS
-        }
+        "active_jobs": active,
+        "system": status
     })
 
 
 @router.post("/tts", response_model=TTSResponse)
 async def create_tts(request: TTSRequest, background_tasks: BackgroundTasks):
     """
-    Inicia a geração de áudio a partir de texto.
-    Retorna um job_id para acompanhar o progresso.
+    Inicia geração de áudio.
+    Retorna job_id para acompanhar progresso.
     """
-    logger.info(f"[API] POST /tts - texto: {len(request.text)} chars, voz: {request.voice_id}")
+    logger.info(f"[API] POST /tts - {len(request.text)} chars")
 
     if not request.text or not request.text.strip():
-        logger.warning("[API] Texto vazio recebido")
-        return TTSResponse(
-            success=False,
-            error="Texto vazio para gerar áudio."
-        )
+        return TTSResponse(success=False, error="Texto vazio.")
 
-    # Verifica sistema
     status = get_system_status()
     if not status["edge_tts_available"]:
-        logger.error("[API] edge-tts não disponível")
-        return TTSResponse(
-            success=False,
-            error="Serviço de voz não está disponível. Verifique a instalação."
-        )
+        return TTSResponse(success=False, error="Serviço de voz indisponível.")
 
-    # Cria job
     job_id = str(uuid.uuid4())[:8]
 
     jobs[job_id] = {
         "status": JobStatus.PENDING,
         "progress": 0,
-        "message": "Iniciando geração de áudio...",
-        "text": request.text,
+        "message": "Iniciando...",
         "voice_id": request.voice_id,
         "speed": request.speed,
+        "detected_language": None,
         "audio_path": None,
-        "text_path": None,
         "audio_url": None,
-        "text_url": None,
-        "pdf_url": None,
         "audio_mode": "single",
         "error": None,
         "created_at": time.time()
     }
 
-    logger.info(f"[API] Job {job_id} criado, iniciando background task...")
+    jobs[job_id]["filename"] = request.filename or ""
 
-    # Inicia processamento em background
     background_tasks.add_task(
-        process_tts_job,
-        job_id,
-        request.text,
-        request.voice_id,
-        request.speed
+        process_tts_job, job_id, request.text, request.voice_id, request.speed, request.file_id, request.skip_translation
     )
 
-    return TTSResponse(
-        success=True,
-        job_id=job_id,
-        status=JobStatus.PENDING
-    )
+    return TTSResponse(success=True, job_id=job_id, status=JobStatus.PENDING)
 
 
 @router.get("/tts/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(job_id: str):
-    """
-    Retorna o status de um job de TTS.
-    """
+    """Retorna status do job."""
     if job_id not in jobs:
-        # Tenta carregar de metadados salvos
         metadata = load_job_metadata(job_id)
         if metadata:
             return JobStatusResponse(
@@ -248,24 +194,11 @@ async def get_job_status(job_id: str):
                 audio_mode=AudioMode(metadata.get("audio_mode", "single")),
                 text_url=metadata.get("text_url"),
                 pdf_url=metadata.get("pdf_url"),
-                error=metadata.get("error")
+                error=metadata.get("error"),
             )
-
         raise HTTPException(status_code=404, detail="Job não encontrado")
 
     job = jobs[job_id]
-
-    # Verifica se job está travado (muito tempo sem atualização)
-    if job.get("status") == JobStatus.GENERATING_AUDIO:
-        started_at = job.get("started_at", job.get("created_at", 0))
-        elapsed = time.time() - started_at
-        if elapsed > TOTAL_JOB_TIMEOUT_SECONDS + 30:  # 30s de margem
-            # Job travou, marca como erro
-            logger.warning(f"[API] Job {job_id} detectado como travado após {elapsed:.1f}s")
-            job["status"] = JobStatus.ERROR
-            job["error"] = "O processamento demorou muito e foi cancelado."
-            job["message"] = "Erro: O processamento demorou muito e foi cancelado."
-            save_job_metadata(job_id, job)
 
     return JobStatusResponse(
         job_id=job_id,
@@ -276,101 +209,82 @@ async def get_job_status(job_id: str):
         audio_mode=AudioMode(job.get("audio_mode", "single")),
         text_url=job.get("text_url"),
         pdf_url=job.get("pdf_url"),
-        error=job.get("error")
+        error=job.get("error"),
     )
 
 
 @router.get("/download/audio/{job_id}")
 async def download_audio(job_id: str):
-    """Baixa o arquivo de áudio gerado."""
+    """Baixa o MP3 final."""
     audio_path = None
 
     if job_id in jobs and jobs[job_id].get("audio_path"):
         audio_path = Path(jobs[job_id]["audio_path"])
     else:
         ensure_outputs_dir()
-        potential_path = OUTPUTS_DIR / f"{job_id}_ptbr.mp3"
-        if potential_path.exists():
-            audio_path = potential_path
+        for suffix in ["_final.mp3", "_ptbr.mp3"]:
+            p = OUTPUTS_DIR / f"{job_id}{suffix}"
+            if p.exists():
+                audio_path = p
+                break
 
     if not audio_path or not audio_path.exists():
-        raise HTTPException(status_code=404, detail="Arquivo de áudio não encontrado")
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+    # Usa nome do arquivo original se disponivel
+    original_name = ""
+    if job_id in jobs:
+        original_name = jobs[job_id].get("filename", "")
+    if original_name:
+        safe_name = re.sub(r'[^\w\s\-.]', '', original_name).strip()
+        download_name = f"{safe_name}.mp3"
+    else:
+        download_name = f"audio_{job_id}.mp3"
 
     return FileResponse(
         path=audio_path,
         media_type="audio/mpeg",
-        filename=audio_path.name,
-        headers={"Content-Disposition": f'attachment; filename="{audio_path.name}"'}
+        filename=download_name
     )
 
 
-@router.get("/download/text/{job_id}")
-async def download_text(job_id: str):
-    """Baixa o arquivo de texto traduzido."""
-    text_path = None
+@router.get("/test/performance")
+async def test_performance():
+    """Endpoint de teste de performance."""
+    test_text = "This is a test. " * 100  # ~1600 chars
 
-    if job_id in jobs and jobs[job_id].get("text_path"):
-        text_path = Path(jobs[job_id]["text_path"])
-    else:
-        ensure_outputs_dir()
-        potential_path = OUTPUTS_DIR / f"{job_id}_ptbr.txt"
-        if potential_path.exists():
-            text_path = potential_path
+    from app.services.fast_pipeline import run_fast_pipeline
+    import tempfile
 
-    if not text_path or not text_path.exists():
-        raise HTTPException(status_code=404, detail="Arquivo de texto não encontrado")
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        output = Path(f.name)
 
-    return FileResponse(
-        path=text_path,
-        media_type="text/plain; charset=utf-8",
-        filename=text_path.name,
-        headers={"Content-Disposition": f'attachment; filename="{text_path.name}"'}
-    )
+    try:
+        success, error, metrics = await run_fast_pipeline(
+            text=test_text,
+            voice_id="pt-BR-FranciscaNeural",
+            speed=1.0,
+            output_path=output,
+            job_id="test",
+            detected_lang="en"
+        )
 
+        result = {
+            "success": success,
+            "error": error,
+            "metrics": {
+                "tts_ms": metrics.tts_ms,
+                "merge_ms": metrics.merge_ms,
+                "total_ms": metrics.total_ms,
+                "chunks": metrics.chunks_count
+            }
+        }
 
-@router.get("/download/pdf/{job_id}")
-async def download_pdf(job_id: str):
-    """Baixa o arquivo PDF do texto traduzido."""
-    pdf_path = None
+        if output.exists():
+            result["file_size"] = output.stat().st_size
+            output.unlink()
 
-    if job_id in jobs and jobs[job_id].get("pdf_path"):
-        pdf_path = Path(jobs[job_id]["pdf_path"])
-    else:
-        ensure_outputs_dir()
-        potential_path = OUTPUTS_DIR / f"{job_id}_ptbr.pdf"
-        if potential_path.exists():
-            pdf_path = potential_path
+        return result
 
-    if not pdf_path or not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="Arquivo PDF não encontrado")
-
-    return FileResponse(
-        path=pdf_path,
-        media_type="application/pdf",
-        filename=pdf_path.name,
-        headers={"Content-Disposition": f'attachment; filename="{pdf_path.name}"'}
-    )
-
-
-@router.get("/download/audio-parts/{job_id}")
-async def download_audio_parts(job_id: str):
-    """Baixa o arquivo ZIP com as partes do áudio."""
-    zip_path = None
-
-    if job_id in jobs and jobs[job_id].get("audio_path"):
-        zip_path = Path(jobs[job_id]["audio_path"])
-    else:
-        ensure_outputs_dir()
-        potential_path = OUTPUTS_DIR / f"{job_id}_ptbr_partes.zip"
-        if potential_path.exists():
-            zip_path = potential_path
-
-    if not zip_path or not zip_path.exists():
-        raise HTTPException(status_code=404, detail="Arquivo ZIP não encontrado")
-
-    return FileResponse(
-        path=zip_path,
-        media_type="application/zip",
-        filename=zip_path.name,
-        headers={"Content-Disposition": f'attachment; filename="{zip_path.name}"'}
-    )
+    except Exception as e:
+        return {"success": False, "error": str(e)}

@@ -1,10 +1,10 @@
 /**
- * Laris - Aplicação Principal
- * Conversor de artigos científicos em áudio.
- * Com tratamento robusto de erros e timeouts.
+ * Laris - Aplicacao Principal
+ * Conversor de texto em audio.
+ * Fluxo: Upload -> Configurar Voz -> Gerar Audio -> Baixar MP3
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { Steps } from './components/Steps';
 import { UploadCard } from './components/UploadCard';
@@ -13,56 +13,38 @@ import { GenerateCard } from './components/GenerateCard';
 import { Alert } from './components/Alert';
 import { useApi, Voice, JobStatus, ExtractResponse } from './hooks/useApi';
 
-// Tempo máximo de polling (16 minutos - backend tem 15min timeout)
-const MAX_POLL_TIME_MS = 960000;
+const MAX_POLL_TIME_MS = 600000; // 10 minutos
 
 function App() {
-  // Acessibilidade
   const [fontSize, setFontSize] = useState(18);
   const [contrast, setContrast] = useState<'normal' | 'super'>('normal');
-
-  // Estado do fluxo
   const [currentStep, setCurrentStep] = useState(1);
-
-  // Dados extraídos
   const [extractedData, setExtractedData] = useState<ExtractResponse | null>(null);
-  const [translatedText, setTranslatedText] = useState<string | null>(null);
-
-  // Configurações
+  const [currentText, setCurrentText] = useState<string>('');
+  const [currentPreview, setCurrentPreview] = useState<string>('');
   const [voices, setVoices] = useState<Voice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState('pt-BR-FranciscaNeural');
   const [speed, setSpeed] = useState(1.0);
-  const [needsTranslation, setNeedsTranslation] = useState(true);
-  const [translationComplete, setTranslationComplete] = useState(false);
-
-  // Status do job
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [textUrl, setTextUrl] = useState<string | null>(null);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-
-  // Ref para controlar tempo de polling
+  const [fileName, setFileName] = useState('');
   const pollStartTimeRef = useRef<number>(0);
 
-  // API
   const {
     loading,
     error,
     setError,
     resetState,
     extractText,
-    translateText,
     getVoices,
     generateAudio,
     checkJobStatus,
   } = useApi();
 
-  // Carrega vozes ao iniciar
   useEffect(() => {
     getVoices().then(setVoices);
   }, [getVoices]);
 
-  // Aplica tamanho de fonte
   useEffect(() => {
     document.documentElement.style.setProperty('--font-size-base', `${fontSize}px`);
     document.documentElement.style.setProperty('--font-size-lg', `${fontSize + 4}px`);
@@ -71,12 +53,10 @@ function App() {
     document.documentElement.style.setProperty('--font-size-sm', `${fontSize - 2}px`);
   }, [fontSize]);
 
-  // Aplica contraste
   useEffect(() => {
     document.documentElement.setAttribute('data-contrast', contrast);
   }, [contrast]);
 
-  // Atalhos de teclado
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.altKey) {
@@ -87,7 +67,7 @@ function App() {
             break;
           case 'g':
             e.preventDefault();
-            if (currentStep >= 2 && !loading) {
+            if (currentStep >= 2 && !loading && currentText) {
               handleGenerate();
             }
             break;
@@ -103,37 +83,31 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentStep, audioUrl, loading]);
+  }, [currentStep, audioUrl, loading, currentText]);
 
-  // Polling do status do job com timeout
+  // Polling do status
   useEffect(() => {
-    if (!jobStatus) {
-      return;
-    }
+    if (!jobStatus) return;
 
-    // Se já terminou (sucesso ou erro), não faz polling
     if (jobStatus.status === 'completed' || jobStatus.status === 'error') {
       pollStartTimeRef.current = 0;
       return;
     }
 
-    // Inicializa tempo de início do polling
     if (pollStartTimeRef.current === 0) {
       pollStartTimeRef.current = Date.now();
     }
 
     const interval = setInterval(async () => {
-      // Verifica timeout do polling
-      const elapsedTime = Date.now() - pollStartTimeRef.current;
-      if (elapsedTime > MAX_POLL_TIME_MS) {
-        console.warn('Polling timeout reached');
+      const elapsed = Date.now() - pollStartTimeRef.current;
+      if (elapsed > MAX_POLL_TIME_MS) {
         setJobStatus({
           ...jobStatus,
           status: 'error',
-          error: 'O processamento demorou muito. Por favor, tente novamente.',
-          message: 'Tempo limite excedido'
+          error: 'Tempo limite excedido.',
+          message: 'Erro'
         });
-        setError('O processamento demorou muito. Por favor, tente novamente.');
+        setError('Tempo limite excedido.');
         resetState();
         pollStartTimeRef.current = 0;
         return;
@@ -147,8 +121,6 @@ function App() {
 
           if (status.status === 'completed') {
             setAudioUrl(status.audio_url || null);
-            setTextUrl(status.text_url || null);
-            setPdfUrl(status.pdf_url || null);
             setCurrentStep(3);
             pollStartTimeRef.current = 0;
           } else if (status.status === 'error') {
@@ -157,74 +129,62 @@ function App() {
               setError(status.error);
             }
           }
+        } else {
+          // Job nao encontrado (404) — para o polling
+          setJobStatus({
+            ...jobStatus,
+            status: 'error',
+            error: 'Job perdido. Tente gerar novamente.',
+            message: 'Erro'
+          });
+          pollStartTimeRef.current = 0;
         }
       } catch (err) {
-        console.error('Erro no polling:', err);
-        // Não para o polling por erro individual, apenas loga
+        console.error('Polling error:', err);
       }
-    }, 1500); // Poll a cada 1.5s para reduzir carga
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [jobStatus, checkJobStatus, setError, resetState]);
 
-  // Handlers
   const handleFileSelect = async (file: File) => {
     setError(null);
     setExtractedData(null);
-    setTranslatedText(null);
-    setTranslationComplete(false);
+    setCurrentText('');
+    setCurrentPreview('');
     setJobStatus(null);
     setAudioUrl(null);
-    setTextUrl(null);
-    setPdfUrl(null);
     pollStartTimeRef.current = 0;
+
+    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+    setFileName(nameWithoutExt);
 
     const data = await extractText(file);
 
     if (data) {
       setExtractedData(data);
-      setNeedsTranslation(!data.is_portuguese);
+      setCurrentText(data.text);
+      setCurrentPreview(data.preview);
       setCurrentStep(2);
-
-      if (data.is_portuguese) {
-        setTranslatedText(data.text);
-        setTranslationComplete(true);
-      }
-    }
-  };
-
-  const handleTranslate = async () => {
-    if (!extractedData) return;
-
-    const result = await translateText(extractedData.text, extractedData.detected_language);
-
-    if (result && result.translated_text) {
-      setTranslatedText(result.translated_text);
-      setTranslationComplete(true);
-    }
-  };
-
-  const handleToggleTranslation = () => {
-    if (extractedData) {
-      setTranslatedText(extractedData.text);
-      setTranslationComplete(true);
-      setNeedsTranslation(false);
     }
   };
 
   const handleGenerate = async () => {
-    const textToSpeak = translatedText || extractedData?.text;
-    if (!textToSpeak) return;
+    if (!currentText) return;
 
-    // Limpa estados anteriores
     setError(null);
     setJobStatus(null);
     setAudioUrl(null);
-    setTextUrl(null);
-    setPdfUrl(null);
     pollStartTimeRef.current = 0;
 
-    const result = await generateAudio(textToSpeak, selectedVoice, speed);
+    const result = await generateAudio(
+      currentText,
+      selectedVoice,
+      speed,
+      extractedData?.file_id,
+      true,
+      fileName
+    );
 
     if (result && result.job_id) {
       pollStartTimeRef.current = Date.now();
@@ -232,7 +192,7 @@ function App() {
         job_id: result.job_id,
         status: 'pending',
         progress: 0,
-        message: 'Iniciando geração de áudio...',
+        message: 'Processando...',
       });
     }
   };
@@ -240,26 +200,23 @@ function App() {
   const handleReset = () => {
     setCurrentStep(1);
     setExtractedData(null);
-    setTranslatedText(null);
-    setTranslationComplete(false);
-    setNeedsTranslation(true);
+    setCurrentText('');
+    setCurrentPreview('');
     setJobStatus(null);
     setAudioUrl(null);
-    setTextUrl(null);
-    setPdfUrl(null);
     setError(null);
     resetState();
     pollStartTimeRef.current = 0;
   };
 
-  // Handler para fechar erro e resetar se necessário
   const handleCloseError = () => {
     setError(null);
-    // Se estava gerando áudio e deu erro, reseta o jobStatus
     if (jobStatus?.status === 'error') {
       setJobStatus(null);
     }
   };
+
+  const isProcessing = jobStatus && jobStatus.status !== 'completed' && jobStatus.status !== 'error';
 
   return (
     <div className="container">
@@ -273,7 +230,6 @@ function App() {
       <main id="main-content">
         <Steps currentStep={currentStep} />
 
-        {/* Erro global */}
         {error && (
           <Alert
             type="error"
@@ -282,64 +238,48 @@ function App() {
           />
         )}
 
-        {/* Passo 1: Upload */}
         <UploadCard
           onFileSelect={handleFileSelect}
           loading={loading && currentStep === 1}
-          disabled={loading}
+          disabled={loading || !!isProcessing}
         />
 
-        {/* Passo 2: Configuração */}
-        {extractedData && (
+        {extractedData && !isProcessing && !audioUrl && (
           <OptionsCard
-            preview={extractedData.preview}
-            charCount={extractedData.char_count}
-            detectedLanguage={extractedData.detected_language}
-            languageName={extractedData.language_name}
-            isPortuguese={extractedData.is_portuguese}
-            needsTranslation={needsTranslation}
-            onToggleTranslation={handleToggleTranslation}
-            translationLoading={loading}
-            translationComplete={translationComplete}
+            preview={currentPreview}
+            charCount={currentText.length}
             voices={voices}
             selectedVoice={selectedVoice}
             onVoiceChange={setSelectedVoice}
             speed={speed}
             onSpeedChange={setSpeed}
-            onTranslate={handleTranslate}
             onGenerate={handleGenerate}
             disabled={loading}
-            canGenerate={translationComplete}
           />
         )}
 
-        {/* Passo 3: Gerar */}
-        {translationComplete && (
+        {(isProcessing || audioUrl) && (
           <GenerateCard
             onGenerate={handleGenerate}
-            loading={loading}
+            loading={loading || isProcessing === true}
             jobStatus={jobStatus}
             audioUrl={audioUrl}
-            textUrl={textUrl}
-            pdfUrl={pdfUrl}
-            disabled={loading || !translationComplete}
+            disabled={loading || isProcessing === true}
           />
         )}
 
-        {/* Botão de recomeçar */}
-        {currentStep > 1 && (
+        {currentStep > 1 && !isProcessing && (
           <div style={{ textAlign: 'center', marginTop: 'var(--spacing-xl)' }}>
             <button
               onClick={handleReset}
               className="btn btn-secondary"
-              disabled={loading}
+              disabled={loading || !!isProcessing}
             >
-              Começar de novo
+              Comecar de novo
             </button>
           </div>
         )}
 
-        {/* Footer */}
         <footer style={{
           marginTop: 'var(--spacing-xl)',
           paddingTop: 'var(--spacing-lg)',
@@ -348,13 +288,19 @@ function App() {
           color: 'var(--color-text-muted)',
         }}>
           <p>
-            Laris - Converta artigos em áudio
-          </p>
-          <p style={{ fontSize: 'var(--font-size-sm)', marginTop: 'var(--spacing-sm)' }}>
-            Processamento local. Seus arquivos não são enviados para a internet.
-          </p>
-          <p style={{ fontSize: 'var(--font-size-sm)', marginTop: 'var(--spacing-xs)' }}>
-            * A geração de voz usa Microsoft Edge TTS, que requer conexão com a internet.
+            <a
+              href="https://www.laris.com.br"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: 'var(--color-primary)',
+                textDecoration: 'none',
+                fontWeight: 600,
+              }}
+            >
+              www.laris.com.br
+            </a>
+            {' '}- Converta textos em audio
           </p>
         </footer>
       </main>

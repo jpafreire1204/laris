@@ -1,6 +1,7 @@
 """
 Laris - Translation Service
-Tradução de textos usando Argos Translate (offline).
+Tradução de textos usando Google Translate (via deep-translator).
+Mais confiável e não requer instalação de modelos.
 """
 
 import logging
@@ -8,104 +9,71 @@ from typing import Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Cache para verificar disponibilidade
+_translator_available: Optional[bool] = None
+
+
+def check_translator_available() -> bool:
+    """Verifica se o deep-translator está disponível."""
+    global _translator_available
+    if _translator_available is None:
+        try:
+            from deep_translator import GoogleTranslator
+            # Testa uma tradução simples
+            translator = GoogleTranslator(source='en', target='pt')
+            result = translator.translate("test")
+            _translator_available = result is not None
+        except Exception as e:
+            logger.warning(f"deep-translator não disponível: {e}")
+            _translator_available = False
+    return _translator_available
+
 
 def check_translation_packages() -> Tuple[bool, List[str], List[str]]:
     """
-    Verifica quais pacotes de tradução estão instalados.
+    Verifica status do serviço de tradução.
 
     Returns:
-        Tupla (en_to_pt_installed, idiomas_disponíveis, idiomas_necessários)
+        Tupla (disponível, idiomas_suportados, idiomas_necessários)
     """
-    try:
-        import argostranslate.package
-        import argostranslate.translate
+    available = check_translator_available()
 
-        # Atualiza lista de pacotes disponíveis
-        argostranslate.package.update_package_index()
-
-        # Lista pacotes instalados
-        installed_packages = argostranslate.translate.get_installed_languages()
-        installed_codes = [lang.code for lang in installed_packages]
-
-        logger.info(f"Idiomas instalados: {installed_codes}")
-
-        # Verifica se temos EN -> PT
-        en_to_pt = False
-        for lang in installed_packages:
-            if lang.code == 'en':
-                translations = lang.get_translation(
-                    argostranslate.translate.get_language_from_code('pt')
-                )
-                if translations:
-                    en_to_pt = True
-                    break
-
-        needs_download = []
-        if not en_to_pt:
-            needs_download.append('en-pt')
-
-        return en_to_pt, installed_codes, needs_download
-
-    except Exception as e:
-        logger.error(f"Erro ao verificar pacotes: {e}")
-        return False, [], ['en-pt']
+    if available:
+        # Google Translate suporta muitos idiomas
+        supported = ['en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'ru', 'zh', 'ja', 'ko']
+        return True, supported, []
+    else:
+        return False, [], ['deep-translator']
 
 
 def install_translation_package(from_code: str = 'en', to_code: str = 'pt') -> Tuple[bool, str]:
     """
-    Instala um pacote de tradução.
-
-    Args:
-        from_code: Código do idioma de origem
-        to_code: Código do idioma de destino
-
-    Returns:
-        Tupla (sucesso, mensagem)
+    Com Google Translate, não precisa instalar pacotes.
+    Este método existe para compatibilidade com a API antiga.
     """
-    try:
-        import argostranslate.package
-        import argostranslate.translate
-
-        logger.info(f"Instalando pacote de tradução: {from_code} -> {to_code}")
-
-        # Atualiza índice de pacotes
-        argostranslate.package.update_package_index()
-
-        # Obtém pacotes disponíveis
-        available_packages = argostranslate.package.get_available_packages()
-
-        # Encontra o pacote correto
-        package_to_install = None
-        for pkg in available_packages:
-            if pkg.from_code == from_code and pkg.to_code == to_code:
-                package_to_install = pkg
-                break
-
-        if not package_to_install:
-            return False, f"Pacote {from_code}->{to_code} não encontrado."
-
-        # Baixa e instala
-        logger.info("Baixando pacote de tradução... Isso pode levar alguns minutos.")
-        download_path = package_to_install.download()
-        argostranslate.package.install_from_path(download_path)
-
-        logger.info("Pacote instalado com sucesso!")
-        return True, f"Pacote de tradução {from_code} -> {to_code} instalado com sucesso!"
-
-    except Exception as e:
-        error_msg = f"Erro ao instalar pacote: {str(e)}"
-        logger.error(error_msg)
-        return False, error_msg
+    if check_translator_available():
+        return True, "Google Translate já está disponível. Não precisa instalar nada."
+    else:
+        return False, (
+            "deep-translator não está instalado. "
+            "Execute: pip install deep-translator"
+        )
 
 
-def translate_text(text: str, from_code: str = 'en', to_code: str = 'pt') -> Tuple[Optional[str], str]:
+def translate_text(
+    text: str,
+    from_code: str = 'en',
+    to_code: str = 'pt',
+    progress_callback=None
+) -> Tuple[Optional[str], str]:
     """
-    Traduz texto de um idioma para outro.
+    Traduz texto usando Google Translate.
 
     Args:
         text: Texto para traduzir
-        from_code: Código do idioma de origem
+        from_code: Código do idioma de origem (auto para detectar)
         to_code: Código do idioma de destino
+        progress_callback: Função callback(current, total) para atualizar progresso
 
     Returns:
         Tupla (texto_traduzido, mensagem_de_erro)
@@ -114,78 +82,142 @@ def translate_text(text: str, from_code: str = 'en', to_code: str = 'pt') -> Tup
         return None, "Texto vazio para traduzir."
 
     try:
-        import argostranslate.translate
+        from deep_translator import GoogleTranslator
 
-        # Obtém os idiomas instalados
-        from_lang = argostranslate.translate.get_language_from_code(from_code)
-        to_lang = argostranslate.translate.get_language_from_code(to_code)
+        logger.info(f"[TRANSLATE] Iniciando tradução: {from_code} -> {to_code}")
+        logger.info(f"[TRANSLATE] Texto original: {len(text)} caracteres")
 
-        if not from_lang:
-            return None, f"Idioma de origem '{from_code}' não instalado. Instale o pacote de tradução."
+        # Normaliza código de idioma
+        source_lang = 'auto' if from_code == 'unknown' else from_code
+        if source_lang.startswith('zh'):
+            source_lang = 'zh-CN'
 
-        if not to_lang:
-            return None, f"Idioma de destino '{to_code}' não instalado. Instale o pacote de tradução."
+        # Google Translate tem limite de 5000 caracteres por requisição
+        # Divide o texto em partes se necessário
+        MAX_CHARS = 4500  # Um pouco abaixo do limite para segurança
 
-        # Obtém a tradução
-        translation = from_lang.get_translation(to_lang)
+        if len(text) <= MAX_CHARS:
+            # Texto pequeno, traduz direto
+            translator = GoogleTranslator(source=source_lang, target=to_code)
+            translated = translator.translate(text)
 
-        if not translation:
-            return None, (
-                f"Tradução de {from_code} para {to_code} não disponível. "
-                "Por favor, instale o pacote de tradução."
-            )
+            if not translated:
+                return None, "Tradução retornou vazio"
 
-        # Traduz preservando parágrafos
-        paragraphs = text.split('\n\n')
-        translated_paragraphs = []
+            logger.info(f"[TRANSLATE] Tradução concluída: {len(translated)} caracteres")
+            return translated.strip(), ""
 
-        for i, paragraph in enumerate(paragraphs):
-            if paragraph.strip():
-                # Traduz linhas individuais dentro do parágrafo para preservar quebras
-                lines = paragraph.split('\n')
-                translated_lines = []
+        else:
+            # Texto grande, divide em partes preservando parágrafos
+            logger.info(f"[TRANSLATE] Texto grande, dividindo em partes...")
 
-                for line in lines:
-                    if line.strip():
-                        translated_line = translation.translate(line.strip())
-                        translated_lines.append(translated_line)
+            paragraphs = text.split('\n\n')
+            translated_parts = []
+            current_batch = ""
+            batch_count = 0
+
+            # Estima o número total de batches para o progresso
+            total_chars = len(text)
+            estimated_batches = max(1, (total_chars // MAX_CHARS) + 1)
+
+            translator = GoogleTranslator(source=source_lang, target=to_code)
+
+            for i, paragraph in enumerate(paragraphs):
+                # Se adicionar este parágrafo exceder o limite, traduz o batch atual
+                if len(current_batch) + len(paragraph) + 2 > MAX_CHARS:
+                    if current_batch:
+                        batch_count += 1
+                        logger.info(f"[TRANSLATE] Traduzindo batch {batch_count}...")
+
+                        # Chama callback de progresso
+                        if progress_callback:
+                            progress_callback(batch_count, estimated_batches)
+
+                        translated_batch = translator.translate(current_batch)
+                        if translated_batch:
+                            translated_parts.append(translated_batch)
+
+                        current_batch = paragraph
                     else:
-                        translated_lines.append('')
+                        # Parágrafo único muito grande, traduz sozinho
+                        batch_count += 1
+                        logger.info(f"[TRANSLATE] Traduzindo parágrafo grande {batch_count}...")
 
-                translated_paragraphs.append('\n'.join(translated_lines))
-            else:
-                translated_paragraphs.append('')
+                        # Chama callback de progresso
+                        if progress_callback:
+                            progress_callback(batch_count, estimated_batches)
 
-            # Log de progresso para textos longos
-            if len(paragraphs) > 10 and (i + 1) % 10 == 0:
-                logger.info(f"Tradução: {i + 1}/{len(paragraphs)} parágrafos")
+                        # Divide o parágrafo em sentenças se necessário
+                        if len(paragraph) > MAX_CHARS:
+                            sentences = paragraph.replace('. ', '.|').split('|')
+                            for sentence in sentences:
+                                if sentence.strip():
+                                    trans = translator.translate(sentence.strip())
+                                    if trans:
+                                        translated_parts.append(trans)
+                        else:
+                            translated_batch = translator.translate(paragraph)
+                            if translated_batch:
+                                translated_parts.append(translated_batch)
 
-        translated_text = '\n\n'.join(translated_paragraphs)
-        return translated_text.strip(), ""
+                        current_batch = ""
+                else:
+                    if current_batch:
+                        current_batch += "\n\n" + paragraph
+                    else:
+                        current_batch = paragraph
+
+                # Log de progresso
+                if len(paragraphs) > 20 and (i + 1) % 20 == 0:
+                    logger.info(f"[TRANSLATE] Progresso: {i + 1}/{len(paragraphs)} parágrafos")
+
+            # Traduz o último batch
+            if current_batch:
+                batch_count += 1
+                logger.info(f"[TRANSLATE] Traduzindo batch final {batch_count}...")
+
+                # Chama callback de progresso final
+                if progress_callback:
+                    progress_callback(batch_count, batch_count)
+
+                translated_batch = translator.translate(current_batch)
+                if translated_batch:
+                    translated_parts.append(translated_batch)
+
+            translated_text = '\n\n'.join(translated_parts)
+
+            logger.info(f"[TRANSLATE] Tradução completa: {len(translated_text)} caracteres em {batch_count} batches")
+            return translated_text.strip(), ""
 
     except ImportError:
         return None, (
-            "Argos Translate não está instalado corretamente. "
-            "Por favor, reinstale as dependências."
+            "deep-translator não está instalado. "
+            "Execute: pip install deep-translator"
         )
 
     except Exception as e:
         error_msg = f"Erro na tradução: {str(e)}"
-        logger.error(error_msg)
+        logger.error(f"[TRANSLATE] {error_msg}")
         return None, error_msg
 
 
 def get_supported_language_pairs() -> List[Tuple[str, str]]:
     """
     Lista pares de idiomas suportados para tradução.
+    Google Translate suporta praticamente qualquer par.
 
     Returns:
         Lista de tuplas (from_code, to_code)
     """
-    # Pares mais comuns para artigos científicos
     return [
         ('en', 'pt'),  # Inglês -> Português
-        ('es', 'pt'),  # Espanhol -> Português (pode não estar disponível)
-        ('fr', 'pt'),  # Francês -> Português (pode não estar disponível)
-        ('de', 'pt'),  # Alemão -> Português (pode não estar disponível)
+        ('es', 'pt'),  # Espanhol -> Português
+        ('fr', 'pt'),  # Francês -> Português
+        ('de', 'pt'),  # Alemão -> Português
+        ('it', 'pt'),  # Italiano -> Português
+        ('nl', 'pt'),  # Holandês -> Português
+        ('ru', 'pt'),  # Russo -> Português
+        ('zh-CN', 'pt'),  # Chinês -> Português
+        ('ja', 'pt'),  # Japonês -> Português
+        ('ko', 'pt'),  # Coreano -> Português
     ]
