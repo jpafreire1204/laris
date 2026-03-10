@@ -3,8 +3,6 @@
  * Componente de alerta acessível.
  */
 
-import React from 'react';
-
 interface AlertProps {
   type: 'error' | 'success' | 'warning' | 'info';
   message: string;

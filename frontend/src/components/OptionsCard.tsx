@@ -3,7 +3,6 @@
  * Card para configuracao de voz e geracao de audio.
  */
 
-import React from 'react';
 import { Voice } from '../hooks/useApi';
 
 interface OptionsCardProps {

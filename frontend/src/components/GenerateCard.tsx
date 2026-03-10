@@ -3,7 +3,6 @@
  * Card para progresso de geracao e download do audio.
  */
 
-import React from 'react';
 import { JobStatus } from '../hooks/useApi';
 
 interface GenerateCardProps {

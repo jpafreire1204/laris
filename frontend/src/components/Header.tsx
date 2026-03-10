@@ -3,8 +3,6 @@
  * Cabeçalho moderno com controles de acessibilidade.
  */
 
-import React from 'react';
-
 interface HeaderProps {
   fontSize: number;
   onFontSizeChange: (size: number) => void;

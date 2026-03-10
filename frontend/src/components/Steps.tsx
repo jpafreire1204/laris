@@ -3,8 +3,6 @@
  * Indicador de passos do wizard.
  */
 
-import React from 'react';
-
 interface StepsProps {
   currentStep: number;
 }
