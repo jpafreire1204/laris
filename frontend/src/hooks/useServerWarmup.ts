@@ -12,6 +12,7 @@ const API_BASE = `${normalizedApiUrl}/api`;
 
 const RETRY_INTERVAL_MS = 5000;
 const MAX_WARMUP_TIME_MS = 90000;
+const KEEP_ALIVE_INTERVAL_MS = 14 * 60 * 1000; // 14 minutes
 
 export type WarmupStatus = 'checking' | 'warming' | 'ready' | 'failed';
 
@@ -21,13 +22,14 @@ export function useServerWarmup() {
   const [showSuccess, setShowSuccess] = useState(false);
   const startTimeRef = useRef<number>(0);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const keepAliveRef = useRef<ReturnType<typeof setInterval>>();
   const mountedRef = useRef(true);
 
   const ping = useCallback(async (): Promise<boolean> => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
-      const response = await fetch(`${API_BASE}/voices`, {
+      const response = await fetch(`${API_BASE}/health`, {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -95,6 +97,24 @@ export function useServerWarmup() {
       clearInterval(secondsTimer);
     };
   }, [ping]);
+
+  // Keep-alive: ping /health every 14 minutes to prevent Render cold start
+  useEffect(() => {
+    if (status !== 'ready') return;
+
+    keepAliveRef.current = setInterval(async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        await fetch(`${API_BASE}/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+      } catch {
+        console.warn('Keep-alive ping failed');
+      }
+    }, KEEP_ALIVE_INTERVAL_MS);
+
+    return () => clearInterval(keepAliveRef.current);
+  }, [status]);
 
   return { status, elapsedSeconds, showSuccess };
 }

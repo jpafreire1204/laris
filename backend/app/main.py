@@ -93,7 +93,7 @@ async def root():
 @app.get("/health")
 async def health():
     """Verifica saúde da API."""
-    return {"status": "healthy"}
+    return {"status": "ok", "service": "laris"}
 
 
 if __name__ == "__main__":
