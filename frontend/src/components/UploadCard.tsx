@@ -7,11 +7,13 @@ import React, { useRef, useState } from 'react';
 
 interface UploadCardProps {
   onFileSelect: (file: File) => void;
+  onExtract?: () => void;
   loading: boolean;
   disabled?: boolean;
+  fileSelected?: boolean;
 }
 
-export function UploadCard({ onFileSelect, loading, disabled }: UploadCardProps) {
+export function UploadCard({ onFileSelect, onExtract, loading, disabled, fileSelected }: UploadCardProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -148,6 +150,18 @@ export function UploadCard({ onFileSelect, loading, disabled }: UploadCardProps)
           </>
         )}
       </div>
+
+      {fileSelected && !loading && onExtract && (
+        <div style={{ textAlign: 'center', marginTop: 'var(--spacing-lg)' }}>
+          <button
+            onClick={onExtract}
+            className="btn btn-primary"
+            disabled={disabled}
+          >
+            Próximo
+          </button>
+        </div>
+      )}
     </div>
   );
 }

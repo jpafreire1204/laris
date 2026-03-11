@@ -29,6 +29,7 @@ function App() {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const pollStartTimeRef = useRef<number>(0);
   const userInteractedRef = useRef(false);
 
@@ -151,8 +152,7 @@ function App() {
     return () => clearInterval(interval);
   }, [jobStatus, checkJobStatus, setError, resetState]);
 
-  const handleFileSelect = async (file: File) => {
-    userInteractedRef.current = true;
+  const handleFileSelect = (file: File) => {
     setError(null);
     setExtractedData(null);
     setCurrentText('');
@@ -160,11 +160,17 @@ function App() {
     setJobStatus(null);
     setAudioUrl(null);
     pollStartTimeRef.current = 0;
+    setSelectedFile(file);
+    setFileName(file.name.replace(/\.[^/.]+$/, ''));
+  };
 
-    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
-    setFileName(nameWithoutExt);
+  const handleExtract = async () => {
+    if (!selectedFile) return;
 
-    const data = await extractText(file);
+    userInteractedRef.current = true;
+    setError(null);
+
+    const data = await extractText(selectedFile);
 
     if (data) {
       setExtractedData(data);
@@ -210,6 +216,7 @@ function App() {
     setCurrentPreview('');
     setJobStatus(null);
     setAudioUrl(null);
+    setSelectedFile(null);
     setError(null);
     resetState();
     pollStartTimeRef.current = 0;
@@ -246,8 +253,10 @@ function App() {
 
         <UploadCard
           onFileSelect={handleFileSelect}
+          onExtract={handleExtract}
           loading={loading && currentStep === 1}
           disabled={loading || !!isProcessing}
+          fileSelected={!!selectedFile}
         />
 
         {extractedData && !isProcessing && !audioUrl && (
