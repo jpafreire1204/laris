@@ -15,11 +15,7 @@ const POLL_TIMEOUT = 15000;
 const MAX_POLL_TIME = 3600000;
 
 function getConnectionErrorMessage() {
-  if (!rawApiUrl) {
-    return 'Servico indisponivel no momento. Tente novamente em alguns instantes.';
-  }
-
-  return 'Nao foi possivel conectar com o servidor. Verifique sua conexao e tente novamente em alguns instantes.';
+  return 'O servidor pode estar iniciando. Aguarde alguns segundos e tente novamente.';
 }
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
@@ -138,8 +134,6 @@ export function useApi() {
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         setError('A extracao demorou muito. Tente um arquivo menor.');
-      } else if (err instanceof Error && err.message) {
-        setError(err.message);
       } else {
         setError(getConnectionErrorMessage());
       }
@@ -197,8 +191,6 @@ export function useApi() {
       setLoading(false);
       if (err instanceof Error && err.name === 'AbortError') {
         setError('A API demorou para responder. Tente novamente em alguns instantes.');
-      } else if (err instanceof Error && err.message) {
-        setError(err.message);
       } else {
         setError(getConnectionErrorMessage());
       }

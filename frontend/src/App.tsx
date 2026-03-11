@@ -30,6 +30,7 @@ function App() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
   const pollStartTimeRef = useRef<number>(0);
+  const userInteractedRef = useRef(false);
 
   const {
     loading,
@@ -151,6 +152,7 @@ function App() {
   }, [jobStatus, checkJobStatus, setError, resetState]);
 
   const handleFileSelect = async (file: File) => {
+    userInteractedRef.current = true;
     setError(null);
     setExtractedData(null);
     setCurrentText('');
@@ -175,6 +177,7 @@ function App() {
   const handleGenerate = async () => {
     if (!currentText) return;
 
+    userInteractedRef.current = true;
     setError(null);
     setJobStatus(null);
     setAudioUrl(null);
@@ -233,7 +236,7 @@ function App() {
       <main id="main-content">
         <Steps currentStep={currentStep} />
 
-        {error && (
+        {error && userInteractedRef.current && (
           <Alert
             type="error"
             message={error}
