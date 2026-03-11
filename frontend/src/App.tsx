@@ -42,13 +42,11 @@ function App() {
     checkJobStatus,
   } = useApi();
 
-  const { status: warmupStatus, elapsedSeconds, showSuccess } = useServerWarmup();
+  useServerWarmup();
 
   useEffect(() => {
-    if (warmupStatus === 'ready') {
-      getVoices().then(setVoices);
-    }
-  }, [getVoices, warmupStatus]);
+    getVoices().then(setVoices);
+  }, [getVoices]);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--font-size-base', `${fontSize}px`);
@@ -235,38 +233,7 @@ function App() {
       <main id="main-content">
         <Steps currentStep={currentStep} />
 
-        {(warmupStatus === 'checking' || warmupStatus === 'warming') && (
-          <div
-            className="alert alert-info"
-            role="status"
-            aria-live="polite"
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-          >
-            <span className="spinner" aria-hidden="true" />
-            <span>
-              O servidor está iniciando, aguarde alguns instantes... ⏳
-              {warmupStatus === 'warming' && elapsedSeconds > 0 && (
-                <> ({elapsedSeconds}s)</>
-              )}
-            </span>
-          </div>
-        )}
-
-        {warmupStatus === 'failed' && (
-          <Alert
-            type="error"
-            message="Não foi possível conectar ao servidor. Tente novamente em alguns minutos."
-          />
-        )}
-
-        {showSuccess && (
-          <Alert
-            type="success"
-            message="Servidor pronto! ✅"
-          />
-        )}
-
-        {error && warmupStatus !== 'failed' && (
+        {error && (
           <Alert
             type="error"
             message={error}
@@ -277,7 +244,7 @@ function App() {
         <UploadCard
           onFileSelect={handleFileSelect}
           loading={loading && currentStep === 1}
-          disabled={loading || !!isProcessing || warmupStatus !== 'ready'}
+          disabled={loading || !!isProcessing}
         />
 
         {extractedData && !isProcessing && !audioUrl && (

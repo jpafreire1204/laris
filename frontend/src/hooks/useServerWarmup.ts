@@ -1,9 +1,10 @@
 /**
  * Laris - Server Warmup Hook
- * Detecta cold start do Render free tier e mostra status amigavel.
+ * Silently pings backend to wake it up and keeps it alive.
+ * No UI side effects — purely background.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 
 const DEFAULT_API_URL = 'https://laris-api.vercel.app';
 const rawApiUrl = import.meta.env.VITE_API_URL?.trim();
@@ -14,14 +15,9 @@ const RETRY_INTERVAL_MS = 5000;
 const MAX_WARMUP_TIME_MS = 90000;
 const KEEP_ALIVE_INTERVAL_MS = 14 * 60 * 1000; // 14 minutes
 
-export type WarmupStatus = 'checking' | 'warming' | 'ready' | 'failed';
-
 export function useServerWarmup() {
-  const [status, setStatus] = useState<WarmupStatus>('checking');
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [showSuccess, setShowSuccess] = useState(false);
   const startTimeRef = useRef<number>(0);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const warmupRef = useRef<ReturnType<typeof setInterval>>();
   const keepAliveRef = useRef<ReturnType<typeof setInterval>>();
   const mountedRef = useRef(true);
 
@@ -39,69 +35,8 @@ export function useServerWarmup() {
     }
   }, []);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    startTimeRef.current = Date.now();
-
-    async function check() {
-      const ok = await ping();
-
-      if (!mountedRef.current) return;
-
-      if (ok) {
-        setStatus('ready');
-        return;
-      }
-
-      // First ping failed — backend is cold, start retry loop
-      setStatus('warming');
-
-      timerRef.current = setInterval(async () => {
-        if (!mountedRef.current) return;
-
-        const elapsed = Date.now() - startTimeRef.current;
-        setElapsedSeconds(Math.floor(elapsed / 1000));
-
-        if (elapsed > MAX_WARMUP_TIME_MS) {
-          clearInterval(timerRef.current);
-          if (mountedRef.current) setStatus('failed');
-          return;
-        }
-
-        const success = await ping();
-        if (!mountedRef.current) return;
-
-        if (success) {
-          clearInterval(timerRef.current);
-          setStatus('ready');
-          setShowSuccess(true);
-          setTimeout(() => {
-            if (mountedRef.current) setShowSuccess(false);
-          }, 2000);
-        }
-      }, RETRY_INTERVAL_MS);
-    }
-
-    check();
-
-    // Elapsed seconds counter (updates every second for display)
-    const secondsTimer = setInterval(() => {
-      if (!mountedRef.current) return;
-      const elapsed = Date.now() - startTimeRef.current;
-      setElapsedSeconds(Math.floor(elapsed / 1000));
-    }, 1000);
-
-    return () => {
-      mountedRef.current = false;
-      clearInterval(timerRef.current);
-      clearInterval(secondsTimer);
-    };
-  }, [ping]);
-
-  // Keep-alive: ping /health every 14 minutes to prevent Render cold start
-  useEffect(() => {
-    if (status !== 'ready') return;
-
+  const startKeepAlive = useCallback(() => {
+    clearInterval(keepAliveRef.current);
     keepAliveRef.current = setInterval(async () => {
       try {
         const controller = new AbortController();
@@ -112,9 +47,52 @@ export function useServerWarmup() {
         console.warn('Keep-alive ping failed');
       }
     }, KEEP_ALIVE_INTERVAL_MS);
+  }, []);
 
-    return () => clearInterval(keepAliveRef.current);
-  }, [status]);
+  useEffect(() => {
+    mountedRef.current = true;
+    startTimeRef.current = Date.now();
 
-  return { status, elapsedSeconds, showSuccess };
+    async function check() {
+      const ok = await ping();
+      if (!mountedRef.current) return;
+
+      if (ok) {
+        console.info('Backend is ready');
+        startKeepAlive();
+        return;
+      }
+
+      // Backend is cold — retry silently
+      console.info('Backend is waking up...');
+
+      warmupRef.current = setInterval(async () => {
+        if (!mountedRef.current) return;
+
+        const elapsed = Date.now() - startTimeRef.current;
+        if (elapsed > MAX_WARMUP_TIME_MS) {
+          clearInterval(warmupRef.current);
+          console.warn('Backend warmup timed out after 90s');
+          return;
+        }
+
+        const success = await ping();
+        if (!mountedRef.current) return;
+
+        if (success) {
+          clearInterval(warmupRef.current);
+          console.info('Backend is ready');
+          startKeepAlive();
+        }
+      }, RETRY_INTERVAL_MS);
+    }
+
+    check();
+
+    return () => {
+      mountedRef.current = false;
+      clearInterval(warmupRef.current);
+      clearInterval(keepAliveRef.current);
+    };
+  }, [ping, startKeepAlive]);
 }
