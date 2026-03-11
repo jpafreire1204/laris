@@ -45,7 +45,7 @@ function App() {
   useServerWarmup();
 
   useEffect(() => {
-    getVoices().then(setVoices);
+    getVoices().then(setVoices).catch(() => {});
   }, [getVoices]);
 
   useEffect(() => {
