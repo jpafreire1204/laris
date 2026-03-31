@@ -6,7 +6,7 @@ Gerenciamento de arquivos e diretórios.
 import os
 import re
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 import logging
@@ -41,6 +41,31 @@ def ensure_outputs_dir() -> Path:
     """Garante que o diretório outputs existe."""
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     return OUTPUTS_DIR
+
+
+def ensure_debug_dir(namespace: str, identifier: str) -> Path:
+    """Garante um diretório de debug por namespace/id dentro de outputs."""
+    debug_dir = ensure_outputs_dir() / "debug" / sanitize_filename(namespace) / sanitize_filename(identifier)
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    return debug_dir
+
+
+def save_debug_json(namespace: str, identifier: str, name: str, payload: Dict[str, Any]) -> Path:
+    """Salva payload JSON de debug em outputs/debug."""
+    debug_dir = ensure_debug_dir(namespace, identifier)
+    path = debug_dir / f"{sanitize_filename(name)}.json"
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2, default=str)
+    return path
+
+
+def save_debug_text(namespace: str, identifier: str, name: str, content: str) -> Path:
+    """Salva texto de debug em outputs/debug."""
+    debug_dir = ensure_debug_dir(namespace, identifier)
+    path = debug_dir / f"{sanitize_filename(name)}.txt"
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write(content or "")
+    return path
 
 
 def sanitize_filename(name: str) -> str:
@@ -90,42 +115,13 @@ def load_job_metadata(job_id: str) -> Optional[Dict[str, Any]]:
         return json.load(f)
 
 
-def cleanup_old_files(max_age_hours: int = 24) -> int:
-    """
-    Remove arquivos antigos do diretório outputs.
-
-    Args:
-        max_age_hours: Idade máxima em horas
-
-    Returns:
-        Número de arquivos removidos
-    """
-    if not OUTPUTS_DIR.exists():
-        return 0
-
-    cutoff = datetime.now() - timedelta(hours=max_age_hours)
-    removed = 0
-
-    for file_path in OUTPUTS_DIR.iterdir():
-        if file_path.is_file():
-            try:
-                mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
-                if mtime < cutoff:
-                    file_path.unlink()
-                    removed += 1
-                    logger.info(f"Arquivo antigo removido: {file_path.name}")
-            except Exception as e:
-                logger.error(f"Erro ao remover {file_path}: {e}")
-
-    return removed
-
 
 def get_file_size_mb(file_path: Path) -> float:
     """Retorna o tamanho do arquivo em MB."""
     return file_path.stat().st_size / (1024 * 1024)
 
 
-def is_valid_upload(filename: str, max_size_mb: float = 50) -> tuple[bool, str]:
+def is_valid_upload(filename: str, max_size_mb: float = 150) -> tuple[bool, str]:
     """
     Verifica se o arquivo é válido para upload.
 

@@ -1,209 +1,297 @@
 """
-Laris - Text Extraction Service
-Extrai texto de PDFs, DOCX e arquivos de texto.
+Document extraction helpers with page-level PDF diagnostics.
 """
+
+from __future__ import annotations
 
 import io
 import logging
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+from app.utils.text_preprocessing import (
+    clean_document_text,
+    line_signature,
+    normalize_line,
+    should_drop_line,
+)
 
 logger = logging.getLogger(__name__)
 
+HEADER_FOOTER_LINE_COUNT = 3
+
+
+@dataclass
+class PageExtractionDiagnostics:
+    page_number: int
+    final_chars: int = 0
+    empty: bool = False
+    discarded: bool = False
+    removed_lines: int = 0
+    removed_patterns: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class ExtractionResult:
+    text: Optional[str]
+    error: str = ""
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+    debug_data: dict[str, Any] = field(default_factory=dict)
+
+
+def _find_repeated_margin_signatures(page_texts: list[str]) -> set[str]:
+    header_counter: Counter[str] = Counter()
+    footer_counter: Counter[str] = Counter()
+    total_pages = len(page_texts)
+    threshold = max(3, total_pages // 4)
+
+    for page_text in page_texts:
+        lines = [normalize_line(line) for line in page_text.splitlines() if normalize_line(line)]
+        header_lines = lines[:HEADER_FOOTER_LINE_COUNT]
+        footer_lines = lines[-HEADER_FOOTER_LINE_COUNT:]
+        for line in header_lines:
+            signature = line_signature(line)
+            if len(signature) >= 10 and len(line.split()) <= 12 and not line.endswith((".", "!", "?")):
+                header_counter[signature] += 1
+        for line in footer_lines:
+            signature = line_signature(line)
+            if len(signature) >= 10 and len(line.split()) <= 12 and not line.endswith((".", "!", "?")):
+                footer_counter[signature] += 1
+
+    repeated = {
+        signature
+        for signature, count in header_counter.items()
+        if count >= threshold
+    }
+    repeated.update(
+        signature
+        for signature, count in footer_counter.items()
+        if count >= threshold
+    )
+    return repeated
+
+
+def _clean_page_text(
+    page_text: str,
+    repeated_margin_signatures: set[str],
+) -> tuple[str, Counter[str], int]:
+    removed_patterns: Counter[str] = Counter()
+    removed_lines = 0
+    kept_lines: list[str] = []
+
+    for line in page_text.splitlines():
+        drop, reason = should_drop_line(line, repeated_margin_signatures=repeated_margin_signatures)
+        if drop:
+            removed_lines += 1
+            if reason and reason != "empty":
+                removed_patterns[reason] += 1
+            continue
+        kept_lines.append(line)
+
+    page_cleaned = "\n".join(kept_lines).strip()
+    return page_cleaned, removed_patterns, removed_lines
+
+
+def _extract_pdf_document(file_content: bytes) -> ExtractionResult:
+    try:
+        import fitz
+    except Exception as exc:  # pragma: no cover - dependency issue
+        logger.error("Erro ao carregar PyMuPDF: %s", exc)
+        return ExtractionResult(
+            text=None,
+            error="A biblioteca de leitura de PDF (PyMuPDF) nao esta disponivel.",
+        )
+
+    try:
+        doc = fitz.open(stream=file_content, filetype="pdf")
+    except Exception as exc:
+        logger.error("Erro ao abrir PDF: %s", exc)
+        return ExtractionResult(
+            text=None,
+            error=(
+                "Nao consegui abrir esse PDF. O arquivo pode estar protegido, "
+                "corrompido ou sem camada de texto selecionavel."
+            ),
+        )
+
+    pages: list[str] = []
+    page_diagnostics: list[PageExtractionDiagnostics] = []
+
+    for index, page in enumerate(doc):
+        try:
+            text = page.get_text("text").strip()
+        except Exception as exc:
+            logger.warning("Erro ao extrair texto da pagina %s: %s", index + 1, exc)
+            text = ""
+
+        page_diag = PageExtractionDiagnostics(
+            page_number=index + 1,
+            final_chars=len(text),
+            empty=not bool(text),
+        )
+        pages.append(text)
+        page_diagnostics.append(page_diag)
+
+    repeated_margin_signatures = _find_repeated_margin_signatures(pages)
+    cleaned_pages: list[str] = []
+    removed_patterns_total: Counter[str] = Counter()
+
+    for idx, page_text in enumerate(pages):
+        page_cleaned, page_removed_patterns, removed_lines = _clean_page_text(
+            page_text,
+            repeated_margin_signatures=repeated_margin_signatures,
+        )
+        page_diagnostics[idx].removed_patterns = dict(sorted(page_removed_patterns.items()))
+        page_diagnostics[idx].removed_lines = removed_lines
+        page_diagnostics[idx].discarded = not bool(page_cleaned.strip())
+        page_diagnostics[idx].final_chars = len(page_cleaned)
+        removed_patterns_total.update(page_removed_patterns)
+        if page_cleaned.strip():
+            cleaned_pages.append(page_cleaned.strip())
+
+    joined_text = "\n\n".join(cleaned_pages).strip()
+    document_cleanup = clean_document_text(joined_text, include_references=True)
+    final_text = document_cleanup["text"]
+    removed_patterns_total.update(document_cleanup["removed_patterns"])
+
+    diagnostics = {
+        "page_count": len(page_diagnostics),
+        "pages_extracted": sum(1 for page in page_diagnostics if not page.discarded),
+        "empty_pages": [page.page_number for page in page_diagnostics if page.empty],
+        "skipped_pages": [page.page_number for page in page_diagnostics if page.discarded],
+        "total_chars_before_cleaning": sum(len(page_text) for page_text in pages),
+        "total_chars_after_cleaning": len(final_text),
+        "removed_characters": document_cleanup["removed_characters"],
+        "removed_patterns": dict(sorted(removed_patterns_total.items())),
+        "page_metrics": [asdict(page) for page in page_diagnostics],
+        "warnings": list(document_cleanup["warnings"]),
+        "truncated": False,
+    }
+
+    logger.info(
+        "PDF extraido: %s paginas, %s paginas com texto, %s chars finais",
+        diagnostics["page_count"],
+        diagnostics["pages_extracted"],
+        diagnostics["total_chars_after_cleaning"],
+    )
+
+    return ExtractionResult(
+        text=final_text if final_text else None,
+        error="" if final_text else "Nao foi possivel extrair texto desse PDF.",
+        diagnostics=diagnostics,
+        debug_data={
+            "raw_extracted_text": "\n\n".join(page_text.strip() for page_text in pages if page_text.strip()),
+            "cleaned_ordered_text": joined_text,
+            "final_text": final_text,
+        },
+    )
+
 
 def extract_text_from_pdf_pypdf(file_content: bytes) -> Optional[str]:
-    """
-    Extrai texto de PDF usando pypdf.
-
-    Args:
-        file_content: Conteúdo do arquivo PDF em bytes
-
-    Returns:
-        Texto extraído ou None em caso de erro
-    """
-    try:
-        from pypdf import PdfReader
-
-        reader = PdfReader(io.BytesIO(file_content))
-        text_parts = []
-
-        for page_num, page in enumerate(reader.pages):
-            try:
-                page_text = page.extract_text()
-                if page_text:
-                    text_parts.append(page_text)
-            except Exception as e:
-                logger.warning(f"Erro ao extrair página {page_num}: {e}")
-
-        text = '\n\n'.join(text_parts)
-        return text.strip() if text.strip() else None
-
-    except Exception as e:
-        logger.error(f"Erro pypdf: {e}")
-        return None
+    """Compatibility helper used by older imports/tests."""
+    return _extract_pdf_document(file_content).text
 
 
 def extract_text_from_pdf_pdfplumber(file_content: bytes) -> Optional[str]:
-    """
-    Extrai texto de PDF usando pdfplumber (fallback).
-
-    Args:
-        file_content: Conteúdo do arquivo PDF em bytes
-
-    Returns:
-        Texto extraído ou None em caso de erro
-    """
-    try:
-        import pdfplumber
-
-        text_parts = []
-
-        with pdfplumber.open(io.BytesIO(file_content)) as pdf:
-            for page_num, page in enumerate(pdf.pages):
-                try:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text_parts.append(page_text)
-                except Exception as e:
-                    logger.warning(f"Erro ao extrair página {page_num}: {e}")
-
-        text = '\n\n'.join(text_parts)
-        return text.strip() if text.strip() else None
-
-    except Exception as e:
-        logger.error(f"Erro pdfplumber: {e}")
-        return None
+    """Compatibility helper used by older imports/tests."""
+    return _extract_pdf_document(file_content).text
 
 
 def extract_text_from_docx(file_content: bytes) -> Optional[str]:
-    """
-    Extrai texto de arquivo DOCX.
-
-    Args:
-        file_content: Conteúdo do arquivo DOCX em bytes
-
-    Returns:
-        Texto extraído ou None em caso de erro
-    """
+    """Extract text from DOCX files."""
     try:
         from docx import Document
 
         doc = Document(io.BytesIO(file_content))
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        text = '\n\n'.join(paragraphs)
-        return text.strip() if text.strip() else None
-
-    except Exception as e:
-        logger.error(f"Erro docx: {e}")
+        paragraphs = [normalize_line(paragraph.text) for paragraph in doc.paragraphs if normalize_line(paragraph.text)]
+        text = "\n\n".join(paragraphs).strip()
+        return text or None
+    except Exception as exc:
+        logger.error("Erro docx: %s", exc)
         return None
 
 
 def extract_text_from_txt(file_content: bytes) -> Optional[str]:
-    """
-    Extrai texto de arquivo TXT.
-
-    Args:
-        file_content: Conteúdo do arquivo TXT em bytes
-
-    Returns:
-        Texto extraído ou None em caso de erro
-    """
-    # Tenta diferentes encodings
-    encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
-
-    for encoding in encodings:
+    """Extract text from plain-text files with encoding fallback."""
+    for encoding in ("utf-8", "latin-1", "cp1252", "iso-8859-1"):
         try:
             text = file_content.decode(encoding)
-            return text.strip() if text.strip() else None
+            text = clean_document_text(text, include_references=True)["text"]
+            return text or None
         except UnicodeDecodeError:
             continue
 
-    logger.error("Não foi possível decodificar o arquivo de texto")
+    logger.error("Nao foi possivel decodificar o arquivo de texto")
     return None
 
 
-def extract_text_from_file(file_content: bytes, filename: str) -> tuple[Optional[str], str]:
-    """
-    Extrai texto de um arquivo baseado na extensão.
+def extract_document_from_file(file_content: bytes, filename: str) -> ExtractionResult:
+    """Extract text and diagnostics from PDF, DOCX or TXT files."""
+    extension = Path(filename).suffix.lower()
 
-    Args:
-        file_content: Conteúdo do arquivo em bytes
-        filename: Nome do arquivo (para identificar extensão)
+    if extension == ".pdf":
+        return _extract_pdf_document(file_content)
 
-    Returns:
-        Tupla (texto_extraído, mensagem_de_erro)
-    """
-    ext = Path(filename).suffix.lower()
-    text = None
-    error_msg = ""
-
-    if ext == '.pdf':
-        # Tenta pypdf primeiro
-        text = extract_text_from_pdf_pypdf(file_content)
-
-        if not text or len(text) < 50:
-            logger.info("pypdf falhou ou retornou pouco texto, tentando pdfplumber...")
-            text = extract_text_from_pdf_pdfplumber(file_content)
-
-        if not text:
-            error_msg = (
-                "Não consegui ler esse PDF. O arquivo pode estar protegido, "
-                "ser uma imagem escaneada, ou estar corrompido. "
-                "Tente salvar o conteúdo como texto (.txt) ou usar outro PDF."
-            )
-
-    elif ext == '.docx':
+    if extension == ".docx":
         text = extract_text_from_docx(file_content)
-        if not text:
-            error_msg = (
-                "Não consegui ler esse documento Word. "
-                "O arquivo pode estar corrompido. Tente salvar como .txt."
-            )
+        return ExtractionResult(
+            text=text,
+            error="" if text else "Nao consegui ler esse arquivo DOCX.",
+            diagnostics={
+                "page_count": None,
+                "pages_extracted": None,
+                "removed_patterns": {},
+                "warnings": [],
+            },
+            debug_data={
+                "raw_extracted_text": text or "",
+                "cleaned_ordered_text": text or "",
+                "final_text": text or "",
+            },
+        )
 
-    elif ext == '.txt':
+    if extension == ".txt":
         text = extract_text_from_txt(file_content)
-        if not text:
-            error_msg = (
-                "Não consegui ler esse arquivo de texto. "
-                "Verifique se o arquivo não está vazio."
-            )
+        return ExtractionResult(
+            text=text,
+            error="" if text else "Nao consegui ler esse arquivo TXT.",
+            diagnostics={
+                "page_count": None,
+                "pages_extracted": None,
+                "removed_patterns": {},
+                "warnings": [],
+            },
+            debug_data={
+                "raw_extracted_text": text or "",
+                "cleaned_ordered_text": text or "",
+                "final_text": text or "",
+            },
+        )
 
-    else:
-        error_msg = f"Tipo de arquivo não suportado: {ext}. Use PDF, DOCX ou TXT."
+    return ExtractionResult(
+        text=None,
+        error=f"Tipo de arquivo nao suportado: {extension}. Use PDF, DOCX ou TXT.",
+    )
 
-    # Limpa o texto extraído
-    if text:
-        # Remove espaços excessivos
-        import re
-        text = re.sub(r' +', ' ', text)
-        # Remove linhas em branco excessivas
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        text = text.strip()
 
-    return text, error_msg
+def extract_text_from_file(file_content: bytes, filename: str) -> tuple[Optional[str], str]:
+    """Backwards-compatible wrapper returning only text and error."""
+    result = extract_document_from_file(file_content, filename)
+    return result.text, result.error
 
 
 def get_text_preview(text: str, max_chars: int = 1500) -> str:
-    """
-    Retorna uma prévia do texto.
-
-    Args:
-        text: Texto completo
-        max_chars: Número máximo de caracteres
-
-    Returns:
-        Prévia do texto
-    """
+    """Return a natural preview of the extracted text."""
+    text = (text or "").strip()
     if len(text) <= max_chars:
         return text
 
-    # Tenta cortar em um ponto natural
     preview = text[:max_chars]
-    last_period = preview.rfind('.')
-    last_newline = preview.rfind('\n')
-
-    cut_point = max(last_period, last_newline)
+    cut_candidates = [preview.rfind(marker) for marker in (". ", "\n\n", "\n")]
+    cut_point = max(cut_candidates)
     if cut_point > max_chars // 2:
-        preview = preview[:cut_point + 1]
+        preview = preview[: cut_point + 1].strip()
 
-    return preview + "\n\n[...]"
+    return preview.rstrip() + "\n\n[...]"

@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 
-const DEFAULT_API_URL = 'https://laris-api.vercel.app';
+const DEFAULT_API_URL = 'http://localhost:8000';
 const rawApiUrl = import.meta.env.VITE_API_URL?.trim();
 const normalizedApiUrl = (rawApiUrl || DEFAULT_API_URL).replace(/\/+$/, '');
 const API_BASE = `${normalizedApiUrl}/api`;

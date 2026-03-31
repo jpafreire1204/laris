@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 
-const DEFAULT_API_URL = 'https://laris-api.vercel.app';
+const DEFAULT_API_URL = 'http://localhost:8000';
 const rawApiUrl = import.meta.env.VITE_API_URL?.trim();
 const normalizedApiUrl = (rawApiUrl || DEFAULT_API_URL).replace(/\/+$/, '');
 const API_BASE = `${normalizedApiUrl}/api`;
@@ -13,9 +13,10 @@ const API_BASE = `${normalizedApiUrl}/api`;
 const REQUEST_TIMEOUT = 30000;
 const POLL_TIMEOUT = 15000;
 const MAX_POLL_TIME = 3600000;
+const EXTRACT_TIMEOUT = 10 * 60 * 1000;
 
 function getConnectionErrorMessage() {
-  return 'O servidor pode estar iniciando. Aguarde alguns segundos e tente novamente.';
+  return 'Não foi possível conectar ao servidor local. Verifique se o backend está rodando na porta 8000.';
 }
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
@@ -46,6 +47,8 @@ export interface ExtractResponse {
   char_count: number;
   error?: string;
   file_id?: string;
+  diagnostics?: Record<string, unknown>;
+  warnings?: string[];
 }
 
 export interface Voice {
@@ -57,6 +60,21 @@ export interface Voice {
 
 export interface VoicesResponse {
   voices: Voice[];
+}
+
+export interface TranslateResponse {
+  success: boolean;
+  original_text: string;
+  translated_text: string;
+  source_language: string;
+  target_language: string;
+  error?: string;
+}
+
+export interface TranslationStatus {
+  installed: boolean;
+  available_languages: string[];
+  needs_download: string[];
 }
 
 export interface TTSResponse {
@@ -72,7 +90,7 @@ export type AudioMode = 'single' | 'parts';
 
 export interface JobStatus {
   job_id: string;
-  status: 'pending' | 'extracting' | 'generating_audio' | 'completed' | 'error';
+  status: 'pending' | 'extracting' | 'translating' | 'generating_audio' | 'completed' | 'error';
   progress: number;
   message: string;
   audio_url?: string;
@@ -80,6 +98,10 @@ export interface JobStatus {
   text_url?: string;
   pdf_url?: string;
   error?: string;
+  stage?: string;
+  details?: Record<string, unknown>;
+  diagnostics?: Record<string, unknown>;
+  warnings?: string[];
 }
 
 // Funcao auxiliar para fetch com timeout
@@ -120,7 +142,7 @@ export function useApi() {
       const response = await fetchWithTimeout(
         `${API_BASE}/extract`,
         { method: 'POST', body: formData },
-        60000
+        EXTRACT_TIMEOUT
       );
 
       const data = await parseApiResponse<ExtractResponse>(response);
@@ -133,7 +155,46 @@ export function useApi() {
       return data;
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        setError('A extracao demorou muito. Tente um arquivo menor.');
+        setError('A extracao demorou muito. Para arquivos grandes, aguarde mais tempo e tente novamente.');
+      } else {
+        setError(getConnectionErrorMessage());
+      }
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Traduz texto
+  const translateText = useCallback(async (
+    text: string,
+    sourceLanguage: string
+  ): Promise<TranslateResponse | null> => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithTimeout(
+        `${API_BASE}/translate`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, source_language: sourceLanguage }),
+        },
+        120000
+      );
+
+      const data = await parseApiResponse<TranslateResponse>(response);
+
+      if (!data.success) {
+        setError(data.error || 'Erro na tradução');
+        return null;
+      }
+
+      return data;
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('A tradução demorou muito. Tente um texto menor.');
       } else {
         setError(getConnectionErrorMessage());
       }
@@ -161,7 +222,8 @@ export function useApi() {
     speed: number,
     fileId?: string,
     skipTranslation: boolean = true,
-    filename?: string
+    filename?: string,
+    includeReferences: boolean = false
   ): Promise<TTSResponse | null> => {
     setLoading(true);
     setError(null);
@@ -173,7 +235,15 @@ export function useApi() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, voice_id: voiceId, speed, file_id: fileId, skip_translation: skipTranslation, filename: filename || '' }),
+          body: JSON.stringify({
+            text,
+            voice_id: voiceId,
+            speed,
+            file_id: fileId,
+            skip_translation: skipTranslation,
+            filename: filename || '',
+            include_references: includeReferences,
+          }),
         },
         REQUEST_TIMEOUT
       );
@@ -261,6 +331,7 @@ export function useApi() {
     setError,
     resetState,
     extractText,
+    translateText,
     getVoices,
     generateAudio,
     checkJobStatus,

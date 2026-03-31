@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const apiUrl = (env.VITE_API_URL || 'https://laris-api.vercel.app').replace(/\/+$/, '')
+  const apiUrl = (env.VITE_API_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
   return {
     plugins: [react()],

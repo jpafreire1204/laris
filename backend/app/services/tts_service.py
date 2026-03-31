@@ -115,7 +115,7 @@ def get_available_voices() -> List[dict]:
 
 def speed_to_rate(speed: float) -> str:
     """Converte velocidade (0.5-2.0) para rate string do edge-tts."""
-    percentage = int((speed - 1.0) * 100)
+    percentage = int(round((speed - 1.0) * 100))
     if percentage >= 0:
         return f"+{percentage}%"
     else:

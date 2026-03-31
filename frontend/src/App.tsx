@@ -1,53 +1,49 @@
 /**
- * Laris - Aplicacao Principal
- * Conversor de texto em audio.
- * Fluxo: Upload -> Configurar Voz -> Gerar Audio -> Baixar MP3
+ * Laris - Aplicacao principal.
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
+import { Alert } from './components/Alert';
+import { GenerateCard } from './components/GenerateCard';
 import { Header } from './components/Header';
+import { OptionsCard } from './components/OptionsCard';
 import { Steps } from './components/Steps';
 import { UploadCard } from './components/UploadCard';
-import { OptionsCard } from './components/OptionsCard';
-import { GenerateCard } from './components/GenerateCard';
-import { Alert } from './components/Alert';
-import { useApi, Voice, JobStatus, ExtractResponse } from './hooks/useApi';
-import { useServerWarmup } from './hooks/useServerWarmup';
-
-const MAX_POLL_TIME_MS = 600000; // 10 minutos
+import { ExtractResponse, JobStatus, Voice, useApi } from './hooks/useApi';
 
 function App() {
   const [fontSize, setFontSize] = useState(18);
   const [contrast, setContrast] = useState<'normal' | 'super'>('normal');
   const [currentStep, setCurrentStep] = useState(1);
+
   const [extractedData, setExtractedData] = useState<ExtractResponse | null>(null);
-  const [currentText, setCurrentText] = useState<string>('');
-  const [currentPreview, setCurrentPreview] = useState<string>('');
+  const [translatedText, setTranslatedText] = useState<string | null>(null);
+  const [uploadedFilename, setUploadedFilename] = useState('');
+
   const [voices, setVoices] = useState<Voice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState('pt-BR-FranciscaNeural');
   const [speed, setSpeed] = useState(1.0);
+  const [translationComplete, setTranslationComplete] = useState(false);
+  const [includeReferences, setIncludeReferences] = useState(false);
+
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [fileName, setFileName] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const pollStartTimeRef = useRef<number>(0);
-  const userInteractedRef = useRef(false);
+  const [textUrl, setTextUrl] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
   const {
     loading,
     error,
     setError,
-    resetState,
     extractText,
+    translateText,
     getVoices,
     generateAudio,
     checkJobStatus,
   } = useApi();
 
-  useServerWarmup();
-
   useEffect(() => {
-    getVoices().then(setVoices).catch(() => {});
+    getVoices().then(setVoices);
   }, [getVoices]);
 
   useEffect(() => {
@@ -63,148 +59,137 @@ function App() {
   }, [contrast]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.altKey) {
-        switch (e.key.toLowerCase()) {
-          case 'u':
-            e.preventDefault();
-            document.querySelector<HTMLElement>('.upload-area')?.click();
-            break;
-          case 'g':
-            e.preventDefault();
-            if (currentStep >= 2 && !loading && currentText) {
-              handleGenerate();
-            }
-            break;
-          case 'd':
-            e.preventDefault();
-            if (audioUrl) {
-              window.open(audioUrl, '_blank');
-            }
-            break;
-        }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey) {
+        return;
+      }
+
+      switch (event.key.toLowerCase()) {
+        case 'u':
+          event.preventDefault();
+          document.querySelector<HTMLElement>('.upload-area')?.click();
+          break;
+        case 'g':
+          event.preventDefault();
+          if (currentStep >= 2) {
+            void handleGenerate();
+          }
+          break;
+        case 'd':
+          event.preventDefault();
+          if (audioUrl) {
+            window.open(audioUrl, '_blank');
+          }
+          break;
+        default:
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentStep, audioUrl, loading, currentText]);
+  }, [currentStep, audioUrl]);
 
-  // Polling do status
   useEffect(() => {
-    if (!jobStatus) return;
-
-    if (jobStatus.status === 'completed' || jobStatus.status === 'error') {
-      pollStartTimeRef.current = 0;
+    if (!jobStatus || jobStatus.status === 'completed' || jobStatus.status === 'error') {
       return;
     }
 
-    if (pollStartTimeRef.current === 0) {
-      pollStartTimeRef.current = Date.now();
-    }
-
     const interval = setInterval(async () => {
-      const elapsed = Date.now() - pollStartTimeRef.current;
-      if (elapsed > MAX_POLL_TIME_MS) {
-        setJobStatus({
-          ...jobStatus,
-          status: 'error',
-          error: 'Tempo limite excedido.',
-          message: 'Erro'
-        });
-        setError('Tempo limite excedido.');
-        resetState();
-        pollStartTimeRef.current = 0;
+      const status = await checkJobStatus(jobStatus.job_id);
+      if (!status) {
         return;
       }
 
-      try {
-        const status = await checkJobStatus(jobStatus.job_id);
-
-        if (status) {
-          setJobStatus(status);
-
-          if (status.status === 'completed') {
-            setAudioUrl(status.audio_url || null);
-            setCurrentStep(3);
-            pollStartTimeRef.current = 0;
-          } else if (status.status === 'error') {
-            pollStartTimeRef.current = 0;
-            if (status.error) {
-              setError(status.error);
-            }
-          }
-        } else {
-          // Job nao encontrado (404) — para o polling
-          setJobStatus({
-            ...jobStatus,
-            status: 'error',
-            error: 'Job perdido. Tente gerar novamente.',
-            message: 'Erro'
-          });
-          pollStartTimeRef.current = 0;
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
+      setJobStatus(status);
+      if (status.status === 'completed') {
+        setAudioUrl(status.audio_url || null);
+        setTextUrl(status.text_url || null);
+        setPdfUrl(status.pdf_url || null);
+        setCurrentStep(3);
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [jobStatus, checkJobStatus, setError, resetState]);
+  }, [jobStatus, checkJobStatus]);
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = async (file: File) => {
     setError(null);
     setExtractedData(null);
-    setCurrentText('');
-    setCurrentPreview('');
+    setTranslatedText(null);
+    setUploadedFilename(file.name);
+    setTranslationComplete(false);
+    setIncludeReferences(false);
     setJobStatus(null);
     setAudioUrl(null);
-    pollStartTimeRef.current = 0;
-    setSelectedFile(file);
-    setFileName(file.name.replace(/\.[^/.]+$/, ''));
-  };
+    setTextUrl(null);
+    setPdfUrl(null);
 
-  const handleExtract = async () => {
-    if (!selectedFile) return;
+    const data = await extractText(file);
+    if (!data) {
+      return;
+    }
 
-    userInteractedRef.current = true;
-    setError(null);
+    setExtractedData(data);
+    setCurrentStep(2);
 
-    const data = await extractText(selectedFile);
-
-    if (data) {
-      setExtractedData(data);
-      setCurrentText(data.text);
-      setCurrentPreview(data.preview);
-      setCurrentStep(2);
+    if (data.is_portuguese) {
+      setTranslatedText(data.text);
+      setTranslationComplete(true);
     }
   };
 
-  const handleGenerate = async () => {
-    if (!currentText) return;
+  const handleTranslate = async () => {
+    if (!extractedData) {
+      return;
+    }
 
-    userInteractedRef.current = true;
+    const result = await translateText(extractedData.text, extractedData.detected_language);
+    if (result?.translated_text) {
+      setTranslatedText(result.translated_text);
+      setTranslationComplete(true);
+    }
+  };
+
+  const handleToggleTranslation = () => {
+    if (!extractedData) {
+      return;
+    }
+
+    setTranslatedText(extractedData.text);
+    setTranslationComplete(true);
+  };
+
+  const handleGenerate = async () => {
+    const textToSpeak = translatedText || extractedData?.text;
+    if (!textToSpeak) {
+      return;
+    }
+
     setError(null);
     setJobStatus(null);
     setAudioUrl(null);
-    pollStartTimeRef.current = 0;
 
     const result = await generateAudio(
-      currentText,
+      textToSpeak,
       selectedVoice,
       speed,
       extractedData?.file_id,
       true,
-      fileName
+      uploadedFilename,
+      includeReferences
     );
 
-    if (result && result.job_id) {
-      pollStartTimeRef.current = Date.now();
+    if (result) {
       setJobStatus({
         job_id: result.job_id,
         status: 'pending',
         progress: 0,
-        message: 'Processando...',
+        message: 'Upload recebido',
+        stage: 'queued',
+        details: {},
+        diagnostics: {},
+        warnings: [],
       });
     }
   };
@@ -212,24 +197,16 @@ function App() {
   const handleReset = () => {
     setCurrentStep(1);
     setExtractedData(null);
-    setCurrentText('');
-    setCurrentPreview('');
+    setTranslatedText(null);
+    setUploadedFilename('');
+    setTranslationComplete(false);
+    setIncludeReferences(false);
     setJobStatus(null);
     setAudioUrl(null);
-    setSelectedFile(null);
+    setTextUrl(null);
+    setPdfUrl(null);
     setError(null);
-    resetState();
-    pollStartTimeRef.current = 0;
   };
-
-  const handleCloseError = () => {
-    setError(null);
-    if (jobStatus?.status === 'error') {
-      setJobStatus(null);
-    }
-  };
-
-  const isProcessing = jobStatus && jobStatus.status !== 'completed' && jobStatus.status !== 'error';
 
   return (
     <div className="container">
@@ -243,79 +220,77 @@ function App() {
       <main id="main-content">
         <Steps currentStep={currentStep} />
 
-        {error && userInteractedRef.current && (
-          <Alert
-            type="error"
-            message={error}
-            onClose={handleCloseError}
-          />
-        )}
+        {error && <Alert type="error" message={error} onClose={() => setError(null)} />}
 
         <UploadCard
           onFileSelect={handleFileSelect}
-          onExtract={handleExtract}
           loading={loading && currentStep === 1}
-          disabled={loading || !!isProcessing}
-          fileSelected={!!selectedFile}
+          disabled={loading}
         />
 
-        {extractedData && !isProcessing && !audioUrl && (
+        {extractedData && (
           <OptionsCard
-            preview={currentPreview}
-            charCount={currentText.length}
+            preview={extractedData.preview}
+            charCount={extractedData.char_count}
+            detectedLanguage={extractedData.detected_language}
+            languageName={extractedData.language_name}
+            isPortuguese={extractedData.is_portuguese}
+            onToggleTranslation={handleToggleTranslation}
+            translationLoading={loading}
+            translationComplete={translationComplete}
             voices={voices}
             selectedVoice={selectedVoice}
             onVoiceChange={setSelectedVoice}
             speed={speed}
             onSpeedChange={setSpeed}
+            includeReferences={includeReferences}
+            onIncludeReferencesChange={setIncludeReferences}
+            extractionDiagnostics={extractedData.diagnostics || {}}
+            extractionWarnings={extractedData.warnings || []}
+            onTranslate={handleTranslate}
             onGenerate={handleGenerate}
             disabled={loading}
+            canGenerate={translationComplete}
           />
         )}
 
-        {(isProcessing || audioUrl) && (
+        {translationComplete && (
           <GenerateCard
             onGenerate={handleGenerate}
-            loading={loading || isProcessing === true}
+            loading={loading}
             jobStatus={jobStatus}
             audioUrl={audioUrl}
-            disabled={loading || isProcessing === true}
+            textUrl={textUrl}
+            pdfUrl={pdfUrl}
+            extractionDiagnostics={extractedData?.diagnostics || {}}
+            extractionWarnings={extractedData?.warnings || []}
+            disabled={loading || !translationComplete}
           />
         )}
 
-        {currentStep > 1 && !isProcessing && (
+        {currentStep > 1 && (
           <div style={{ textAlign: 'center', marginTop: 'var(--spacing-xl)' }}>
-            <button
-              onClick={handleReset}
-              className="btn btn-secondary"
-              disabled={loading || !!isProcessing}
-            >
+            <button onClick={handleReset} className="btn btn-secondary" disabled={loading}>
               Comecar de novo
             </button>
           </div>
         )}
 
-        <footer style={{
-          marginTop: 'var(--spacing-xl)',
-          paddingTop: 'var(--spacing-lg)',
-          borderTop: '2px solid var(--color-border)',
-          textAlign: 'center',
-          color: 'var(--color-text-muted)',
-        }}>
-          <p>
-            <a
-              href="https://www.laris.com.br"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                color: 'var(--color-primary)',
-                textDecoration: 'none',
-                fontWeight: 600,
-              }}
-            >
-              www.laris.com.br
-            </a>
-            {' '}- Converta textos em audio
+        <footer
+          style={{
+            marginTop: 'var(--spacing-xl)',
+            paddingTop: 'var(--spacing-lg)',
+            borderTop: '2px solid var(--color-border)',
+            textAlign: 'center',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          <p>Laris - Converta artigos em audio</p>
+          <p style={{ fontSize: 'var(--font-size-sm)', marginTop: 'var(--spacing-sm)' }}>
+            Processamento local. Seus arquivos nao sao enviados para a internet.
+          </p>
+          <p style={{ fontSize: 'var(--font-size-sm)', marginTop: 'var(--spacing-xs)' }}>
+            * A geracao de voz usa Microsoft Edge TTS, que requer conexao com a internet.
           </p>
         </footer>
       </main>

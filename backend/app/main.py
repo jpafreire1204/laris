@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.routes import extract_router, translate_router, tts_router, voices_router, podcast_router
-from app.utils.file_utils import ensure_outputs_dir, cleanup_old_files
+from app.utils.file_utils import ensure_outputs_dir
 
 # Configuração de logging
 logging.basicConfig(
@@ -27,7 +27,6 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Iniciando Laris...")
     ensure_outputs_dir()
-    cleanup_old_files(max_age_hours=24)
     logger.info("Laris iniciado com sucesso!")
 
     yield

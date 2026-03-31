@@ -1,21 +1,20 @@
 /**
  * Laris - Upload Card Component
- * Card para upload de arquivos com área de arrastar e soltar.
+ * Card para upload de arquivos com area de arrastar e soltar.
  */
 
 import React, { useRef, useState } from 'react';
 
+const MAX_UPLOAD_MB = 150;
+
 interface UploadCardProps {
   onFileSelect: (file: File) => void;
-  onExtract?: () => void;
   loading: boolean;
   disabled?: boolean;
-  fileSelected?: boolean;
 }
 
-export function UploadCard({ onFileSelect, onExtract, loading, disabled, fileSelected }: UploadCardProps) {
+export function UploadCard({ onFileSelect, loading, disabled }: UploadCardProps) {
   const [isDragOver, setIsDragOver] = useState(false);
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -72,16 +71,15 @@ export function UploadCard({ onFileSelect, onExtract, loading, disabled, fileSel
     const extension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
 
     if (!validTypes.includes(file.type) && !validExtensions.includes(extension)) {
-      alert('Tipo de arquivo não suportado. Use PDF, TXT ou DOCX.');
+      alert('Tipo de arquivo nao suportado. Use PDF, TXT ou DOCX.');
       return;
     }
 
-    if (file.size > 50 * 1024 * 1024) {
-      alert('Arquivo muito grande. Máximo: 50 MB.');
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      alert(`Arquivo muito grande. Maximo: ${MAX_UPLOAD_MB} MB.`);
       return;
     }
 
-    setSelectedFileName(file.name);
     onFileSelect(file);
   };
 
@@ -90,7 +88,7 @@ export function UploadCard({ onFileSelect, onExtract, loading, disabled, fileSel
       <div className="card-header">
         <h2 className="card-title">Passo 1: Enviar Arquivo</h2>
         <p className="card-subtitle">
-          Envie seu artigo em PDF, DOCX ou TXT (máximo 50 MB)
+          Envie seu artigo em PDF, DOCX ou TXT (maximo {MAX_UPLOAD_MB} MB)
         </p>
       </div>
 
@@ -103,7 +101,7 @@ export function UploadCard({ onFileSelect, onExtract, loading, disabled, fileSel
         onDrop={handleDrop}
         role="button"
         tabIndex={disabled ? -1 : 0}
-        aria-label="Área de upload. Clique ou arraste um arquivo para enviar."
+        aria-label="Area de upload. Clique ou arraste um arquivo para enviar."
         aria-disabled={disabled}
         style={{ opacity: disabled ? 0.5 : 1 }}
       >
@@ -121,47 +119,26 @@ export function UploadCard({ onFileSelect, onExtract, loading, disabled, fileSel
           <>
             <div className="spinner" style={{ marginBottom: 'var(--spacing-md)' }} />
             <p style={{ fontSize: 'var(--font-size-lg)' }}>
-              Extraindo texto do arquivo...
-            </p>
-          </>
-        ) : selectedFileName ? (
-          <>
-            <div className="upload-icon" aria-hidden="true">
-              ✅
-            </div>
-            <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, marginBottom: 'var(--spacing-sm)' }}>
-              {selectedFileName}
-            </p>
-            <p style={{ color: 'var(--color-text-secondary)' }}>
-              Clique para trocar o arquivo
+              Extraindo texto do arquivo. Para PDFs grandes, isso pode levar alguns minutos...
             </p>
           </>
         ) : (
           <>
             <div className="upload-icon" aria-hidden="true">
-              📄
+              ðŸ“„
             </div>
             <p style={{ fontSize: 'var(--font-size-xl)', fontWeight: 600, marginBottom: 'var(--spacing-sm)' }}>
-              Clique aqui para enviar o arquivo
+              Clique aqui ou arraste o arquivo
             </p>
             <p style={{ color: 'var(--color-text-secondary)' }}>
               Formatos aceitos: PDF, DOCX, TXT
             </p>
+            <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)', marginTop: 'var(--spacing-sm)' }}>
+              Atalho: Alt + U
+            </p>
           </>
         )}
       </div>
-
-      {fileSelected && !loading && onExtract && (
-        <div style={{ textAlign: 'center', marginTop: 'var(--spacing-lg)' }}>
-          <button
-            onClick={onExtract}
-            className="btn btn-primary"
-            disabled={disabled}
-          >
-            Próximo
-          </button>
-        </div>
-      )}
     </div>
   );
 }

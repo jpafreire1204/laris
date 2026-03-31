@@ -1,15 +1,16 @@
 """
-Laris - Pydantic Schemas
-Modelos de dados para requisições e respostas da API.
+Laris - Pydantic schemas.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from enum import Enum
+from typing import Any, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class JobStatus(str, Enum):
     """Status de processamento de um job."""
+
     PENDING = "pending"
     EXTRACTING = "extracting"
     TRANSLATING = "translating"
@@ -19,26 +20,31 @@ class JobStatus(str, Enum):
 
 
 class ExtractResponse(BaseModel):
-    """Resposta da extração de texto."""
+    """Resposta da extracao de texto."""
+
     success: bool
     text: str = ""
-    preview: str = ""  # Primeiros ~1500 caracteres
+    preview: str = ""
     detected_language: str = ""
     language_name: str = ""
     is_portuguese: bool = False
     char_count: int = 0
     error: Optional[str] = None
-    file_id: Optional[str] = None  # ID do PDF original (para manter layout)
+    file_id: Optional[str] = None
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class TranslateRequest(BaseModel):
-    """Requisição de tradução."""
+    """Requisicao de traducao."""
+
     text: str
-    source_language: str = "en"  # Código do idioma fonte
+    source_language: str = "en"
 
 
 class TranslateResponse(BaseModel):
-    """Resposta da tradução."""
+    """Resposta da traducao."""
+
     success: bool
     original_text: str = ""
     translated_text: str = ""
@@ -48,30 +54,35 @@ class TranslateResponse(BaseModel):
 
 
 class VoiceInfo(BaseModel):
-    """Informações sobre uma voz disponível."""
+    """Informacoes de uma voz disponivel."""
+
     id: str
     name: str
-    gender: str  # "Feminino" ou "Masculino"
+    gender: str
     locale: str
 
 
 class VoicesResponse(BaseModel):
-    """Lista de vozes disponíveis."""
+    """Lista de vozes disponiveis."""
+
     voices: List[VoiceInfo]
 
 
 class TTSRequest(BaseModel):
-    """Requisição de geração de áudio."""
+    """Requisicao de geracao de audio."""
+
     text: str
-    voice_id: str = "pt-BR-FranciscaNeural"  # Voz padrão feminina
-    speed: float = Field(default=1.0, ge=0.5, le=2.0)  # 0.5x a 2x
+    voice_id: str = "pt-BR-FranciscaNeural"
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
     file_id: Optional[str] = None
     skip_translation: bool = False
     filename: Optional[str] = None
+    include_references: bool = False
 
 
 class TTSResponse(BaseModel):
-    """Resposta da geração de áudio."""
+    """Resposta de criacao do job de TTS."""
+
     success: bool
     job_id: str = ""
     status: JobStatus = JobStatus.PENDING
@@ -81,43 +92,51 @@ class TTSResponse(BaseModel):
 
 
 class AudioMode(str, Enum):
-    """Modo de áudio gerado."""
-    SINGLE = "single"  # MP3 único (pydub disponível)
-    PARTS = "parts"    # ZIP com partes (fallback)
+    """Modo do audio retornado."""
+
+    SINGLE = "single"
+    PARTS = "parts"
 
 
 class JobStatusResponse(BaseModel):
-    """Status de um job."""
+    """Status atual de um job."""
+
     job_id: str
     status: JobStatus
-    progress: int = 0  # 0-100
+    progress: int = 0
     message: str = ""
     audio_url: Optional[str] = None
-    audio_mode: AudioMode = AudioMode.SINGLE  # sempre "single" agora
+    audio_mode: AudioMode = AudioMode.SINGLE
     text_url: Optional[str] = None
     pdf_url: Optional[str] = None
     error: Optional[str] = None
-    # Campos de tradução
-    detected_language: Optional[str] = None  # código do idioma (en, pt, es, etc.)
-    language_name: Optional[str] = None  # nome do idioma (Inglês, Português, etc.)
-    translation_skipped: Optional[bool] = None  # True se texto já era PT-BR
+    stage: Optional[str] = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    detected_language: Optional[str] = None
+    language_name: Optional[str] = None
+    translation_skipped: Optional[bool] = None
 
 
 class TranslationPackageStatus(BaseModel):
-    """Status dos pacotes de tradução instalados."""
+    """Status dos pacotes de traducao instalados."""
+
     installed: bool
     available_languages: List[str]
     needs_download: List[str]
 
 
 class InstallPackageRequest(BaseModel):
-    """Requisição para instalar pacote de tradução."""
+    """Requisicao para instalar pacote de traducao."""
+
     from_code: str = "en"
     to_code: str = "pt"
 
 
 class InstallPackageResponse(BaseModel):
-    """Resposta da instalação de pacote."""
+    """Resposta da instalacao de pacote."""
+
     success: bool
     message: str
     error: Optional[str] = None

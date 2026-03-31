@@ -34,6 +34,18 @@ git push -u origin main
 - `ffmpeg` is available by default on Nixpacks builds.
 - The `outputs/` directory is ephemeral (resets on each deploy). For persistent storage, add a Railway volume mounted at `/app/outputs`.
 
+### Vercel Serverless Backend (experimental)
+
+The backend now includes `backend/index.py`, which lets Vercel detect the FastAPI app when the project root is set to `backend`.
+
+Important limitations before using Vercel for the backend:
+
+- The TTS flow uses `BackgroundTasks`, in-memory job state, and files written to `outputs/`.
+- On Vercel, files are redirected to temporary storage and do not persist across invocations.
+- Long audio generation and `ffmpeg`-heavy work may exceed serverless execution limits.
+
+For health checks, simple reads, and light API traffic, Vercel can work. For the full TTS pipeline, Railway remains the recommended backend host.
+
 ---
 
 ## 3. Deploy Frontend on Vercel
